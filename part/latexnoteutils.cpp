@@ -454,7 +454,7 @@ bool applyRenderedLatexStampAnnotationAppearance(QWidget *parent,
     showRenderWarning(parent, rendered.warning);
     if (rendered.pdfFileName == stampAnnotation->latexAppearancePdfFileName() && updatedRect == stampAnnotation->boundingRectangle() && qAbs(stampAnnotation->latexLayoutWidth() - layoutWidthPoints) < 1e-3 &&
         stampAnnotation->isOkularLatex() && stampAnnotation->latexTextColor() == textColor && stampAnnotation->latexFillColor() == fillColor &&
-        stampAnnotation->latexBorderColor() == borderColor && qAbs(stampAnnotation->style().width() - targetBorderWidth) < 1e-6) {
+        stampAnnotation->latexBorderColor() == borderColor && qAbs(stampAnnotation->style().width() - targetBorderWidth) < 1e-6 && (stampAnnotation->flags() & Okular::Annotation::FixedRotation)) {
         if (prepareModification) {
             return true;
         }
@@ -464,6 +464,7 @@ bool applyRenderedLatexStampAnnotationAppearance(QWidget *parent,
         document->prepareToModifyAnnotationProperties(stampAnnotation);
     }
     stampAnnotation->setOkularLatex(true);
+    stampAnnotation->setFlags(stampAnnotation->flags() | Okular::Annotation::FixedRotation);
     stampAnnotation->setLatexNoteType(stampAnnotation->isLatexCallout() ? Okular::Annotation::LatexNoteCallout : (boxed ? Okular::Annotation::LatexNoteBoxed : Okular::Annotation::LatexNotePlain));
     stampAnnotation->setStampIconName(QStringLiteral("latex-notes"));
     stampAnnotation->setStampImagePath(QString());

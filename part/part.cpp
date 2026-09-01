@@ -4422,6 +4422,101 @@ void Part::deletePage(int pageNumber)
     }
 }
 
+void Part::setPageRotation(int pageNumber, int rotationDegrees)
+{
+    if (!m_document->isOpened() || !url().isLocalFile() || isDocumentArchive || !m_document->canRotatePage()) {
+        KMessageBox::information(widget(), i18n("Pages can only be rotated individually in local PDF files."));
+        return;
+    }
+
+    const int pageCount = static_cast<int>(m_document->pages());
+    if (pageNumber < 0 || pageNumber >= pageCount) {
+        KMessageBox::information(widget(), i18n("The target page could not be found."));
+        return;
+    }
+
+    const int normalizedRotation = ((rotationDegrees % 360) + 360) % 360;
+    if (normalizedRotation % 90 != 0) {
+        KMessageBox::information(widget(), i18n("A page can only be rotated in 90-degree increments."));
+        return;
+    }
+
+    const Okular::Page *page = m_document->page(pageNumber);
+    const int currentRotation = static_cast<int>(page->orientation()) * 90;
+    if (currentRotation == normalizedRotation) {
+        return;
+    }
+
+    const QUrl documentUrl = url();
+    const QString backingFileName = localFilePath();
+    const QFileInfo backingInfo(backingFileName);
+    if (backingFileName.isEmpty() || !backingInfo.exists()) {
+        KMessageBox::information(widget(), i18n("The current PDF file could not be found on disk."));
+        return;
+    }
+
+    const bool hasTemplateNotes = documentHasTemplateNotes();
+    if (hasTemplateNotes) {
+        refreshTemplateNotes();
+    }
+
+    std::unique_ptr<QTemporaryFile> savedSourceFile;
+    QString sourceFileName;
+    QString snapshotErrorText;
+    const PageEditSourceSnapshotResult snapshotResult = createPageEditSourceSnapshot(m_document, QStringLiteral("mengshee-page-rotate-source"), savedSourceFile, sourceFileName, snapshotErrorText);
+    if (snapshotResult == PageEditSourceSnapshotResult::TemporaryFileError) {
+        KMessageBox::information(widget(), i18n("Could not create a temporary file for page rotation."));
+        return;
+    }
+    if (snapshotResult == PageEditSourceSnapshotResult::SaveError) {
+        if (snapshotErrorText.isEmpty()) {
+            KMessageBox::information(widget(), i18n("Could not prepare the current document state for page rotation."));
+        } else {
+            KMessageBox::information(widget(), i18n("Could not prepare the current document state for page rotation. %1", snapshotErrorText));
+        }
+        return;
+    }
+
+    std::unique_ptr<QTemporaryFile> editedFile(createClosedTemporaryPdfFile(QStringLiteral("mengshee-page-rotate-output")));
+    if (!editedFile) {
+        KMessageBox::information(widget(), i18n("Could not create a temporary file for page rotation."));
+        return;
+    }
+
+    const int pageNumberOneBased = pageNumber + 1;
+    QString errorText;
+    if (!m_document->saveWithPageRotated(sourceFileName, editedFile->fileName(), pageNumberOneBased, normalizedRotation, &errorText)) {
+        if (errorText.isEmpty()) {
+            KMessageBox::information(widget(), i18n("Could not rotate the page."));
+        } else {
+            KMessageBox::information(widget(), i18n("Could not rotate the page. %1", errorText));
+        }
+        return;
+    }
+
+    setUrl(documentUrl);
+    KParts::OpenUrlArguments args = arguments();
+    args.setMimeType(QStringLiteral("application/pdf"));
+    setArguments(args);
+
+    const QString editedFileName = editedFile->fileName();
+    auto command = std::make_unique<PageBackingFileCommand>(this,
+                                                            i18nc("Undo action", "Rotate Page"),
+                                                            std::move(savedSourceFile),
+                                                            sourceFileName,
+                                                            std::move(editedFile),
+                                                            editedFileName,
+                                                            pageNumber,
+                                                            pageNumber,
+                                                            true);
+    m_document->pushUndoCommand(command.release());
+    refreshTemplateNotes();
+
+    if (m_pageView) {
+        m_pageView->displayMessage(i18n("Rotated page %1. Save the document to keep this change.", pageNumberOneBased));
+    }
+}
+
 void Part::movePageFromThumbnail(int sourcePage, int targetPage, bool insertAfterTarget)
 {
     int destinationPage = targetPage + (insertAfterTarget ? 1 : 0);
@@ -4698,6 +4793,9 @@ void Part::showMenu(const Okular::Page *page, const QPoint point, const QString 
     const QAction *insertBlankPageAfterPageAction = nullptr;
     const QAction *duplicatePageAction = nullptr;
     const QAction *deletePageAction = nullptr;
+    const QAction *rotatePageLeftAction = nullptr;
+    const QAction *rotatePageRightAction = nullptr;
+    const QAction *resetPageRotationAction = nullptr;
     const QAction *pasteAnnotation = nullptr;
     int pageEditTargetPage = -1;
     bool hasPastePoint = false;
@@ -4737,6 +4835,15 @@ void Part::showMenu(const Okular::Page *page, const QPoint point, const QString 
         }
         if (canEditPages && m_document->canDeletePage() && m_document->pages() > 1) {
             deletePageAction = popup.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Delete This Page"));
+            addedPageEditAction = true;
+        }
+        if (canEditPages && m_document->canRotatePage()) {
+            QMenu *rotatePageMenu = popup.addMenu(QIcon::fromTheme(QStringLiteral("object-rotate-right")), i18n("Rotate This Page"));
+            rotatePageLeftAction = rotatePageMenu->addAction(QIcon::fromTheme(QStringLiteral("object-rotate-left")), i18n("Rotate Left"));
+            rotatePageRightAction = rotatePageMenu->addAction(QIcon::fromTheme(QStringLiteral("object-rotate-right")), i18n("Rotate Right"));
+            QAction *resetAction = rotatePageMenu->addAction(QIcon::fromTheme(QStringLiteral("document-revert")), i18n("Reset Orientation"));
+            resetAction->setEnabled(page->orientation() != Okular::Rotation0);
+            resetPageRotationAction = resetAction;
             addedPageEditAction = true;
         }
         if (addedPageEditAction) {
@@ -4799,6 +4906,12 @@ void Part::showMenu(const Okular::Page *page, const QPoint point, const QString 
                 duplicatePage(pageEditTargetPage);
             } else if (res == deletePageAction) {
                 deletePage(pageEditTargetPage);
+            } else if (res == rotatePageLeftAction) {
+                setPageRotation(pageEditTargetPage, (static_cast<int>(page->orientation()) + 3) % 4 * 90);
+            } else if (res == rotatePageRightAction) {
+                setPageRotation(pageEditTargetPage, (static_cast<int>(page->orientation()) + 1) % 4 * 90);
+            } else if (res == resetPageRotationAction) {
+                setPageRotation(pageEditTargetPage, 0);
             } else if (res == pasteAnnotation) {
                 AnnotationPopup annotPopup(m_document, AnnotationPopup::SingleAnnotationMode, widget());
                 annotPopup.pasteAnnotationToPage(page->number(), hasPastePoint ? &pastePoint : nullptr);

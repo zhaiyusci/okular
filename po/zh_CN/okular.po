@@ -6743,3 +6743,59 @@ msgstr "下一张纸"
 #, kde-format
 msgid "Sheet %1 of %2"
 msgstr "第 %1 张，共 %2 张"
+
+#: part/part.cpp
+msgid "Pages can only be rotated individually in local PDF files."
+msgstr "只能在本地 PDF 文件中单独旋转页面。"
+
+#: part/part.cpp
+msgid "A page can only be rotated in 90-degree increments."
+msgstr "页面只能以 90 度为增量旋转。"
+
+#: part/part.cpp
+msgid "Could not create a temporary file for page rotation."
+msgstr "无法为页面旋转创建临时文件。"
+
+#: part/part.cpp
+msgid "Could not prepare the current document state for page rotation."
+msgstr "无法准备当前文档状态以旋转页面。"
+
+#: part/part.cpp
+#, kde-format
+msgid "Could not prepare the current document state for page rotation. %1"
+msgstr "无法准备当前文档状态以旋转页面。%1"
+
+#: part/part.cpp
+msgid "Could not rotate the page."
+msgstr "无法旋转页面。"
+
+#: part/part.cpp
+#, kde-format
+msgid "Could not rotate the page. %1"
+msgstr "无法旋转页面。%1"
+
+#: part/part.cpp
+msgctxt "Undo action"
+msgid "Rotate Page"
+msgstr "旋转页面"
+
+#: part/part.cpp
+#, kde-format
+msgid "Rotated page %1. Save the document to keep this change."
+msgstr "已旋转第 %1 页。请保存文档以保留此更改。"
+
+#: part/part.cpp
+msgid "Rotate This Page"
+msgstr "旋转此页"
+
+#: part/part.cpp
+msgid "Rotate Left"
+msgstr "向左旋转"
+
+#: part/part.cpp
+msgid "Rotate Right"
+msgstr "向右旋转"
+
+#: part/part.cpp
+msgid "Reset Orientation"
+msgstr "恢复默认方向"

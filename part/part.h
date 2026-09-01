@@ -346,6 +346,7 @@ private:
     QString pageTemplateFileName() const;
     void setPageTemplateFileName(const QString &fileName);
     void deletePage(int pageNumber);
+    void setPageRotation(int pageNumber, int rotationDegrees);
     void movePageTo(int sourcePage, int destinationPage);
     void movePageFromThumbnail(int sourcePage, int targetPage, bool insertAfterTarget);
     bool documentHasTemplateNotes() const;

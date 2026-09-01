@@ -6006,6 +6006,25 @@ bool Document::saveWithPageMoved(const QString &sourceFileName, const QString &o
     return pageInsertion->saveWithPageMoved(sourceFileName, outputFileName, sourcePageNumber, destinationPageNumber, errorText);
 }
 
+bool Document::canRotatePage() const
+{
+    const auto pageInsertion = dynamic_cast<PageInsertionInterface *>(d->m_generator);
+    return pageInsertion && pageInsertion->canRotatePage();
+}
+
+bool Document::saveWithPageRotated(const QString &sourceFileName, const QString &outputFileName, int pageNumber, int rotationDegrees, QString *errorText)
+{
+    auto pageInsertion = dynamic_cast<PageInsertionInterface *>(d->m_generator);
+    if (!pageInsertion || sourceFileName.isEmpty() || outputFileName.isEmpty()) {
+        if (errorText) {
+            errorText->clear();
+        }
+        return false;
+    }
+
+    return pageInsertion->saveWithPageRotated(sourceFileName, outputFileName, pageNumber, rotationDegrees, errorText);
+}
+
 void Document::setHistoryClean(bool clean)
 {
     if (clean) {

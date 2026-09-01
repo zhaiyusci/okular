@@ -114,6 +114,8 @@ public:
     bool canMovePageInDocument() const override;
     bool movePageInDocument(int sourcePageNumber, int destinationPageNumber, QString *errorText) override;
     bool saveWithPageMoved(const QString &sourceFileName, const QString &outputFileName, int sourcePageNumber, int destinationPageNumber, QString *errorText) override;
+    bool canRotatePage() const override;
+    bool saveWithPageRotated(const QString &sourceFileName, const QString &outputFileName, int pageNumber, int rotationDegrees, QString *errorText) override;
 
     bool canSign() const override;
     std::pair<Okular::SigningResult, QString> sign(const Okular::NewSignatureData &oData, const QString &rFilename) override;

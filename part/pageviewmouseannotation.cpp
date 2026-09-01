@@ -681,6 +681,7 @@ static bool applyLatexResizeUpdate(Okular::Document *document, const LatexResize
         stampAnnotation->style().setWidth(boxed ? qMax(0.0, stampAnnotation->style().width()) : 0.0);
     }
     annotation->setOkularLatex(true);
+    annotation->setFlags(annotation->flags() | Okular::Annotation::FixedRotation);
     annotation->setLatexAppearancePdfFileName(pdfFileName);
     annotation->setLatexLayoutWidth(update.layoutWidthPoints);
     annotation->setBoundingRectangle(updatedRect);

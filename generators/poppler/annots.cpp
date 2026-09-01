@@ -1895,7 +1895,11 @@ Okular::Annotation *createAnnotationFromPopplerAnnotation(Poppler::Annotation *p
         okularAnnotation->setUniqueName(popplerAnnotation->uniqueName());
         okularAnnotation->setModificationDate(popplerAnnotation->modificationDate());
         okularAnnotation->setCreationDate(popplerAnnotation->creationDate());
-        okularAnnotation->setFlags(popplerAnnotation->flags() | Okular::Annotation::External);
+        int flags = popplerAnnotation->flags() | Okular::Annotation::External;
+        if (okularAnnotation->isOkularLatex()) {
+            flags |= Okular::Annotation::FixedRotation;
+        }
+        okularAnnotation->setFlags(flags);
         okularAnnotation->setBoundingRectangle(Okular::NormalizedRect::fromQRectF(okularBoundaryForPopplerAnnotation(popplerAnnotation)));
 
         if (externallyDrawn) {

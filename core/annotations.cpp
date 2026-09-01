@@ -876,6 +876,9 @@ void Annotation::setOkularLatex(bool latex)
 {
     Q_D(Annotation);
     d->m_okularLatex = latex;
+    if (latex && subType() == AStamp) {
+        d->m_flags |= FixedRotation;
+    }
 }
 
 bool Annotation::isOkularLatex() const
@@ -1368,6 +1371,9 @@ void AnnotationPrivate::setAnnotationProperties(const QDomNode &node)
     }
     if (e.hasAttribute(QStringLiteral("okularLatex"))) {
         m_okularLatex = e.attribute(QStringLiteral("okularLatex")).toInt() != 0;
+        if (m_okularLatex) {
+            m_flags |= Annotation::FixedRotation;
+        }
     }
     if (e.hasAttribute(QStringLiteral("latexNoteType"))) {
         const QString type = e.attribute(QStringLiteral("latexNoteType"));

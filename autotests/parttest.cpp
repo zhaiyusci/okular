@@ -100,6 +100,9 @@ private Q_SLOTS:
     void testSaveAsUndoStackAnnotations_data();
     void testSaveAsUndoStackForms();
     void testSaveAsUndoStackForms_data();
+    void testRotateSinglePageBackend();
+    void testRotateSinglePage();
+    void testLatexNoteOnRotatedPage();
     void testMouseMoveOverLinkWhileInSelectionMode();
     void testClickUrlLinkWhileInSelectionMode();
     void testeTextSelectionOverAndAcrossLinks_data();
@@ -2081,6 +2084,124 @@ void PartTest::testSaveAsUndoStackForms_data()
 
     QTest::newRow("pdf") << KDESRCDIR "data/formSamples.pdf" << "pdf" << false;
     QTest::newRow("pdfarchive") << KDESRCDIR "data/formSamples.pdf" << "okular" << true;
+}
+
+void PartTest::testRotateSinglePageBackend()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString workingFile = tempDir.filePath(QStringLiteral("rotate-page-backend-source.pdf"));
+    const QString rotatedFile = tempDir.filePath(QStringLiteral("rotate-page-backend-output.pdf"));
+    QVERIFY(QFile::copy(QStringLiteral(KDESRCDIR "data/simple-multipage.pdf"), workingFile));
+
+    Okular::Part part(nullptr, {});
+    QVERIFY(openDocument(&part, workingFile));
+    QVERIFY(part.m_document->canRotatePage());
+    QVERIFY(part.m_document->pages() > 2);
+
+    constexpr int targetPage = 1;
+    const Okular::Rotation previousPageOrientation = part.m_document->page(targetPage - 1)->orientation();
+    const Okular::Rotation originalOrientation = part.m_document->page(targetPage)->orientation();
+    const Okular::Rotation nextPageOrientation = part.m_document->page(targetPage + 1)->orientation();
+    const auto rotatedOrientation = static_cast<Okular::Rotation>((static_cast<int>(originalOrientation) + 1) % 4);
+
+    QString errorText;
+    QVERIFY2(part.m_document->saveWithPageRotated(workingFile, rotatedFile, targetPage + 1, static_cast<int>(rotatedOrientation) * 90, &errorText), qPrintable(errorText));
+
+    Okular::Part reopenedPart(nullptr, {});
+    QVERIFY(openDocument(&reopenedPart, rotatedFile));
+    QCOMPARE(reopenedPart.m_document->page(targetPage - 1)->orientation(), previousPageOrientation);
+    QCOMPARE(reopenedPart.m_document->page(targetPage)->orientation(), rotatedOrientation);
+    QCOMPARE(reopenedPart.m_document->page(targetPage + 1)->orientation(), nextPageOrientation);
+}
+
+void PartTest::testRotateSinglePage()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString workingFile = tempDir.filePath(QStringLiteral("rotate-page-source.pdf"));
+    QVERIFY(QFile::copy(QStringLiteral(KDESRCDIR "data/simple-multipage.pdf"), workingFile));
+
+    Okular::Part part(nullptr, {});
+    QVERIFY(openDocument(&part, workingFile));
+    QVERIFY(part.m_document->canRotatePage());
+    QVERIFY(part.m_document->pages() > 2);
+
+    constexpr int targetPage = 1;
+    const Okular::Rotation previousPageOrientation = part.m_document->page(targetPage - 1)->orientation();
+    const Okular::Rotation originalOrientation = part.m_document->page(targetPage)->orientation();
+    const Okular::Rotation nextPageOrientation = part.m_document->page(targetPage + 1)->orientation();
+    const Okular::Page *originalPageObject = part.m_document->page(targetPage);
+    const auto rotatedOrientation = static_cast<Okular::Rotation>((static_cast<int>(originalOrientation) + 1) % 4);
+
+    part.setPageRotation(targetPage, static_cast<int>(rotatedOrientation) * 90);
+    QVERIFY(part.m_document->page(targetPage) != originalPageObject);
+    QCOMPARE(part.m_document->page(targetPage - 1)->orientation(), previousPageOrientation);
+    QCOMPARE(part.m_document->page(targetPage)->orientation(), rotatedOrientation);
+    QCOMPARE(part.m_document->page(targetPage + 1)->orientation(), nextPageOrientation);
+    QVERIFY(part.m_document->canUndo());
+
+    const Okular::Page *rotatedPageObject = part.m_document->page(targetPage);
+    part.m_document->undo();
+    QVERIFY(part.m_document->page(targetPage) != rotatedPageObject);
+    QCOMPARE(part.m_document->page(targetPage)->orientation(), originalOrientation);
+    QVERIFY(part.m_document->canRedo());
+
+    part.m_document->redo();
+    QCOMPARE(part.m_document->page(targetPage)->orientation(), rotatedOrientation);
+    QVERIFY(part.m_document->canUndo());
+
+    part.m_document->undo();
+    QCOMPARE(part.m_document->page(targetPage)->orientation(), originalOrientation);
+    QVERIFY(!part.m_document->canUndo());
+}
+
+void PartTest::testLatexNoteOnRotatedPage()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString workingFile = tempDir.filePath(QStringLiteral("latex-rotated-page-source.pdf"));
+    QVERIFY(QFile::copy(QStringLiteral(KDESRCDIR "data/simple-multipage.pdf"), workingFile));
+
+    Okular::Part part(nullptr, {});
+    QVERIFY(openDocument(&part, workingFile));
+
+    constexpr int targetPage = 1;
+    part.setPageRotation(targetPage, 90);
+    const Okular::Page *page = part.m_document->page(targetPage);
+    QCOMPARE(page->orientation(), Okular::Rotation90);
+
+    auto *annotation = new Okular::StampAnnotation;
+    annotation->setBoundingRectangle(Okular::NormalizedRect(0.2, 0.2, 0.5, 0.3));
+    annotation->setContents(QStringLiteral("Rotated LaTeX note"));
+    annotation->setOkularLatex(true);
+    QVERIFY(annotation->flags() & Okular::Annotation::FixedRotation);
+    annotation->setLatexNoteType(Okular::Annotation::LatexNoteBoxed);
+    const QString appearanceFile = tempDir.filePath(QStringLiteral("latex-default-note.pdf"));
+    QVERIFY(QFile::copy(QStringLiteral(":/mengshee/data/latex-default-note.pdf"), appearanceFile));
+    annotation->setLatexAppearancePdfFileName(appearanceFile);
+    annotation->setLatexLayoutWidth(120.0);
+    annotation->setLatexPadding(3.0);
+    annotation->setLatexTextColor(Qt::black);
+    annotation->setLatexFillColor(QColor(QStringLiteral("#ffff00")));
+    annotation->setLatexBorderColor(Qt::red);
+    annotation->style().setWidth(2.0);
+    part.m_document->addPageAnnotation(targetPage, annotation);
+
+    const QString annotationName = annotation->uniqueName();
+    const QString outputFile = tempDir.filePath(QStringLiteral("latex-note-rotated.pdf"));
+    QString errorText;
+    QVERIFY2(part.m_document->saveChanges(outputFile, &errorText), qPrintable(errorText));
+    QVERIFY(QFileInfo::exists(outputFile));
+
+    Okular::Part reopenedPart(nullptr, {});
+    QVERIFY(openDocument(&reopenedPart, outputFile));
+    const Okular::Page *reopenedPage = reopenedPart.m_document->page(targetPage);
+    QCOMPARE(reopenedPage->orientation(), Okular::Rotation90);
+    const Okular::Annotation *reopenedAnnotation = reopenedPage->annotation(annotationName);
+    QVERIFY(reopenedAnnotation);
+    QVERIFY(reopenedAnnotation->isOkularLatex());
+    QVERIFY(reopenedAnnotation->flags() & Okular::Annotation::FixedRotation);
 }
 
 void PartTest::testOpenUrlArguments()

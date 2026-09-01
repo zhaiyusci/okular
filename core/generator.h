@@ -251,6 +251,19 @@ public:
      * Both page numbers are 1-based.
      */
     virtual bool saveWithPageMoved(const QString &sourceFileName, const QString &outputFileName, int sourcePageNumber, int destinationPageNumber, QString *errorText) = 0;
+
+    /**
+     * Returns whether this generator can write a copy with one page assigned
+     * an explicit clockwise rotation.
+     */
+    virtual bool canRotatePage() const = 0;
+
+    /**
+     * Writes @p outputFileName as a copy of @p sourceFileName with page
+     * @p pageNumber rotated to @p rotationDegrees clockwise. The page number
+     * is 1-based and the rotation must be 0, 90, 180, or 270 degrees.
+     */
+    virtual bool saveWithPageRotated(const QString &sourceFileName, const QString &outputFileName, int pageNumber, int rotationDegrees, QString *errorText) = 0;
 };
 
 /**

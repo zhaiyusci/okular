@@ -1041,6 +1041,19 @@ public:
     bool saveWithPageMoved(const QString &sourceFileName, const QString &outputFileName, int sourcePageNumber, int destinationPageNumber, QString *errorText);
 
     /**
+     * Returns whether the current document backend can write a copy with one
+     * page assigned an explicit rotation.
+     */
+    bool canRotatePage() const;
+
+    /**
+     * Writes @p outputFileName as a copy of @p sourceFileName with page
+     * @p pageNumber rotated to @p rotationDegrees clockwise. The page number
+     * is 1-based and the rotation must be 0, 90, 180, or 270 degrees.
+     */
+    bool saveWithPageRotated(const QString &sourceFileName, const QString &outputFileName, int pageNumber, int rotationDegrees, QString *errorText);
+
+    /**
      * Sets the history to be clean
      *
      * @since 1.3

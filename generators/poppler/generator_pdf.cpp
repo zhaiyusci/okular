@@ -2840,6 +2840,16 @@ bool PDFGenerator::saveWithPageMoved(const QString &sourceFileName, const QStrin
     return runPdfPagesOperation([&] { return PdfPageSequenceEditor::movePage(pdfPagesFileName(sourceFileName), pdfPagesFileName(outputFileName), sourcePageNumber, destinationPageNumber); }, errorText);
 }
 
+bool PDFGenerator::canRotatePage() const
+{
+    return true;
+}
+
+bool PDFGenerator::saveWithPageRotated(const QString &sourceFileName, const QString &outputFileName, int pageNumber, int rotationDegrees, QString *errorText)
+{
+    return runPdfPagesOperation([&] { return PdfPageSequenceEditor::rotatePage(pdfPagesFileName(sourceFileName), pdfPagesFileName(outputFileName), pageNumber, rotationDegrees); }, errorText);
+}
+
 Okular::AnnotationProxy *PDFGenerator::annotationProxy() const
 {
     return annotProxy;
