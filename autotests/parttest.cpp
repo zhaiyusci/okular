@@ -112,6 +112,7 @@ private Q_SLOTS:
     void testeRectSelectionStartingOnLinks();
     void testCheckBoxReadOnly();
     void testCrashTextEditDestroy();
+    void testAnnotWindowAppearance();
     void testAnnotWindow();
     void testAdditionalActionTriggers();
     void testTypewriterAnnotTool();
@@ -2453,6 +2454,56 @@ void PartTest::testAnnotWindow()
     QSignalSpy latexWindowDestroyed(latexWindow, &QObject::destroyed);
     latexWindow->close();
     QTRY_COMPARE(latexWindowDestroyed.count(), 1);
+}
+
+void PartTest::testAnnotWindowAppearance()
+{
+    Okular::Settings::setAnnotationPopupTextFontSize(15);
+
+    Okular::Part part(nullptr, {});
+    QVERIFY(openDocument(&part, QStringLiteral(KDESRCDIR "data/file1.pdf")));
+
+    auto *annotation = new Okular::TextAnnotation();
+    annotation->setBoundingRectangle(Okular::NormalizedRect(0.1, 0.1, 0.2, 0.2));
+    annotation->setContents(QStringLiteral("Readable popup contents"));
+    annotation->style().setColor(QColor(Qt::red));
+    part.m_document->addPageAnnotation(0, annotation);
+
+    const QList<QFrame *> existingWindows = part.m_pageView->findChildren<QFrame *>(QStringLiteral("AnnotWindow"));
+    QVERIFY(QMetaObject::invokeMethod(part.m_pageView,
+                                      "openAnnotationWindow",
+                                      Qt::DirectConnection,
+                                      Q_ARG(Okular::Annotation *, annotation),
+                                      Q_ARG(int, 0)));
+    QTRY_COMPARE(part.m_pageView->findChildren<QFrame *>(QStringLiteral("AnnotWindow")).size(), existingWindows.size() + 1);
+
+    QFrame *window = nullptr;
+    for (QFrame *candidate : part.m_pageView->findChildren<QFrame *>(QStringLiteral("AnnotWindow"))) {
+        if (!existingWindows.contains(candidate)) {
+            window = candidate;
+            break;
+        }
+    }
+    QVERIFY(window);
+
+    auto *textEdit = window->findChild<QTextEdit *>();
+    QVERIFY(textEdit);
+
+    const QColor background = textEdit->palette().color(QPalette::Base);
+    QCOMPARE(textEdit->palette().color(QPalette::Text), QColor(Qt::black));
+    QCOMPARE(window->palette().color(QPalette::WindowText), QColor(Qt::black));
+    QCOMPARE(background.hslHue(), QColor(Qt::red).hslHue());
+    QCOMPARE(background.hslSaturation(), QColor(Qt::red).hslSaturation());
+    QVERIFY(background.lightnessF() >= 0.90);
+    QCOMPARE(textEdit->font().pointSize(), 15);
+
+    Okular::Settings::setAnnotationPopupTextFontSize(18);
+    Okular::Settings::self()->save();
+    QTRY_COMPARE(textEdit->font().pointSize(), 18);
+
+    QSignalSpy windowDestroyed(window, &QObject::destroyed);
+    window->close();
+    QTRY_COMPARE(windowDestroyed.count(), 1);
 }
 
 // Helper for testAdditionalActionTriggers

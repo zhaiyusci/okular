@@ -68,10 +68,12 @@ namespace
 {
 constexpr int popupCaretWidth = 3;
 
-QColor readableForeground(const QColor &background)
+QColor popupPaperColor(const QColor &annotationColor)
 {
-    const int luminance = 299 * background.red() + 587 * background.green() + 114 * background.blue();
-    return luminance < 128000 ? QColor(Qt::white) : QColor(Qt::black);
+    const QColor baseColor = annotationColor.isValid() ? annotationColor.toHsl() : QColor(Qt::yellow).toHsl();
+    const qreal hue = baseColor.hslHueF() >= 0.0 ? baseColor.hslHueF() : 0.0;
+    const qreal lightness = qMax(0.90, baseColor.lightnessF());
+    return QColor::fromHslF(hue, baseColor.hslSaturationF(), lightness);
 }
 
 class PopupTextEdit final : public KTextEdit
@@ -510,6 +512,7 @@ AnnotWindow::AnnotWindow(QWidget *parent, QRect initialViewportBounds, Okular::A
     setGeometry(QRect(initialPosition, defaultSize));
 
     reloadInfo();
+    connect(Okular::Settings::self(), &KCoreConfigSkeleton::configChanged, this, &AnnotWindow::reloadInfo);
 
     QScrollArea *scrollArea = m_title->scrollArea();
     if (scrollArea) {
@@ -561,9 +564,10 @@ void AnnotWindow::reloadInfo()
     if (!newcolor.isValid()) {
         newcolor = m_annot->style().color().isValid() ? QColor(m_annot->style().color().red(), m_annot->style().color().green(), m_annot->style().color().blue(), 255) : Qt::yellow;
     }
+    newcolor = popupPaperColor(newcolor);
     if (newcolor != m_color) {
         m_color = newcolor;
-        const QColor foreground = readableForeground(m_color);
+        const QColor foreground = Qt::black;
         QPalette windowPalette(m_color);
         windowPalette.setColor(QPalette::WindowText, foreground);
         windowPalette.setColor(QPalette::Text, foreground);
@@ -573,6 +577,12 @@ void AnnotWindow::reloadInfo()
         pl.setColor(QPalette::Text, foreground);
         pl.setColor(QPalette::WindowText, foreground);
         setEditorPalette(pl);
+    }
+
+    if (textEdit) {
+        QFont popupFont = textEdit->font();
+        popupFont.setPointSize(qBound(8, static_cast<int>(Okular::Settings::annotationPopupTextFontSize()), 36));
+        textEdit->setFont(popupFont);
     }
 
     Okular::Annotation *parent = m_annot;

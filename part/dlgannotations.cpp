@@ -28,6 +28,7 @@
 #include <QSet>
 #include <QScrollArea>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QUrl>
@@ -98,6 +99,13 @@ DlgAnnotations::DlgAnnotations(QWidget *parent)
     authorInfoLabel->setWordWrap(true);
     layout->addRow(authorInfoLabel);
     // END Author row
+
+    auto *popupTextFontSize = new QSpinBox(this);
+    popupTextFontSize->setObjectName(QStringLiteral("kcfg_AnnotationPopupTextFontSize"));
+    popupTextFontSize->setRange(8, 36);
+    popupTextFontSize->setSuffix(i18nc("@item:spinbox Config dialog, annotations page", " pt"));
+    popupTextFontSize->setToolTip(i18nc("@info:tooltip Config dialog, annotations page", "Used by all plain-text annotation popups."));
+    layout->addRow(i18nc("@label:spinbox Config dialog, annotations page", "Popup note text size:"), popupTextFontSize);
 
     // Silly 1Em spacer:
     layout->addRow(new QLabel(this));

@@ -2698,6 +2698,24 @@ msgstr ""
 "<b>注意</b>：此信息仅用于备注，它将被保存到批注过的文档中，因此也会随被批注的"
 "文档一起被传输。"
 
+#: part/dlgannotations.cpp
+#, kde-format
+msgctxt "@item:spinbox Config dialog, annotations page"
+msgid " pt"
+msgstr " 磅"
+
+#: part/dlgannotations.cpp
+#, kde-format
+msgctxt "@info:tooltip Config dialog, annotations page"
+msgid "Used by all plain-text annotation popups."
+msgstr "用于所有纯文本批注弹窗。"
+
+#: part/dlgannotations.cpp
+#, kde-format
+msgctxt "@label:spinbox Config dialog, annotations page"
+msgid "Popup note text size:"
+msgstr "弹出便笺文字大小："
+
 #: part/dlgannotations.cpp:48
 #, kde-format
 msgctxt ""
