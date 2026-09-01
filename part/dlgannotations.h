@@ -12,6 +12,7 @@
 class QLabel;
 class QComboBox;
 class QLineEdit;
+class QPushButton;
 class QTimer;
 
 class DlgAnnotations : public QWidget
@@ -25,9 +26,12 @@ private:
     void refreshStemTeXStatus();
     void reloadStemTeXProfiles();
     void syncStemTeXProfileCombo(const QString &profileName);
+    void launchStemTeXProfileCreator();
 
     QComboBox *m_stemTeXProfileCombo = nullptr;
     QLineEdit *m_stemTeXProfileNameEdit = nullptr;
+    QLineEdit *m_stemTeXTexmfRootEdit = nullptr;
+    QPushButton *m_stemTeXProfileCreatorButton = nullptr;
     QLabel *m_stemTeXStatusLabel = nullptr;
     QTimer *m_stemTeXStatusTimer = nullptr;
 };

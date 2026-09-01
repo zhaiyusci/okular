@@ -34,6 +34,7 @@
 #include <QJsonParseError>
 #include <QLibrary>
 #include <QList>
+#include <QSet>
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QThread>
@@ -127,8 +128,10 @@ struct StemTeXEngineSnapshot {
 };
 
 struct StemTeXProfileInfo {
+    QString id;
     QString name;
     QString path;
+    bool userManaged = false;
 };
 
 struct StemtexApi {
@@ -254,7 +257,7 @@ public:
         return status;
     }
 
-    static QStringList availableProfileNames()
+    static QList<StemTeXProfile> availableProfileRecords()
     {
         const QString runtime = runtimeRoot();
         const QString dllPath = rendererDllPath(runtime);
@@ -269,19 +272,28 @@ public:
             return {};
         }
 
-        QStringList names;
+        QList<StemTeXProfile> records;
         QString lastError;
         const QList<StemTeXProfileInfo> profiles = availableProfiles(api, &lastError);
         for (const StemTeXProfileInfo &profile : profiles) {
-            names << profile.name;
+            records << StemTeXProfile {profile.id, profile.name, profile.path, profile.userManaged};
         }
-        names.removeDuplicates();
-        return names;
+        return records;
     }
 
     static QString defaultTexmfRoot()
     {
         return runtimeRoot();
+    }
+
+    static QString resolvedRuntimeRoot()
+    {
+        return runtimeRoot();
+    }
+
+    static QString managedUserProfilesRoot()
+    {
+        return userProfilesRoot();
     }
 
     LatexRenderer::Error render(const QString &latexSource, const QColor &textColor, double maxWidth, double fontSize, QString &pdfFileName, QString &latexOutput, QStringList &fileList, LatexRenderWarning *warning)
@@ -642,7 +654,6 @@ private:
                  QStringLiteral("bin/windows/dvipdfmxdaemon.dll"),
                  QStringLiteral("bin/windows/dvisvgmdaemon.exe"),
                  QStringLiteral("bin/windows/dvisvgmdaemon.dll"),
-                 QStringLiteral("texmf-var/web2c/xetex/xelatexdaemon.fmt"),
              }) {
             if (!QFileInfo::exists(runtimeDir.filePath(relativePath))) {
                 return relativePath;
@@ -661,7 +672,7 @@ private:
         return configuredTexmf.isEmpty() ? runtimeRoot : QDir::cleanPath(QDir(configuredTexmf).absolutePath());
     }
 
-    static QString profilesRoot()
+    static QString bundledProfilesRoot()
     {
         const QString envProfiles = environmentPath("MENGSHEE_STEMTEX_PROFILES_ROOT");
         if (!envProfiles.isEmpty()) {
@@ -670,16 +681,30 @@ private:
         return QDir::cleanPath(QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../StemTeX/gui/profiles")));
     }
 
-    static QString writableStemTeXTempRoot()
+    static QString writableStemTeXRoot()
     {
-        QString temp = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-        if (temp.isEmpty()) {
-            temp = QDir::tempPath();
+        QString data = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        if (data.isEmpty()) {
+            data = QDir(QDir::tempPath()).filePath(QStringLiteral("mengshee"));
         }
-        return QDir::cleanPath(QDir(temp).filePath(QStringLiteral("mengshee/StemTeX")));
+        return QDir::cleanPath(QDir(data).filePath(QStringLiteral("StemTeX")));
     }
 
-    static bool readProfileInfo(const StemtexApi &api, const QString &profileRoot, StemTeXProfileInfo *profileInfo, QString *error)
+    static QString userProfilesRoot()
+    {
+        const QString envProfiles = environmentPath("MENGSHEE_STEMTEX_USER_PROFILES_ROOT");
+        if (!envProfiles.isEmpty()) {
+            return envProfiles;
+        }
+        return QDir(writableStemTeXRoot()).filePath(QStringLiteral("profiles"));
+    }
+
+    static QString writableStemTeXTempRoot()
+    {
+        return QDir(writableStemTeXRoot()).filePath(QStringLiteral("temporary"));
+    }
+
+    static bool readProfileInfo(const StemtexApi &api, const QString &profileRoot, const QString &idPrefix, bool userManaged, StemTeXProfileInfo *profileInfo, QString *error)
     {
         if (profileRoot.isEmpty()) {
             if (error) {
@@ -732,8 +757,10 @@ private:
             name = QFileInfo(path).fileName();
         }
         if (profileInfo) {
+            profileInfo->id = idPrefix + QLatin1Char(':') + QFileInfo(path).fileName();
             profileInfo->name = name;
             profileInfo->path = QDir::cleanPath(path);
+            profileInfo->userManaged = userManaged;
         }
         return true;
     }
@@ -741,21 +768,33 @@ private:
     static QList<StemTeXProfileInfo> availableProfiles(const StemtexApi &api, QString *lastError)
     {
         QList<StemTeXProfileInfo> profiles;
-        const QString root = profilesRoot();
-        const QDir profilesDir(root);
-        if (!profilesDir.exists()) {
-            if (lastError) {
-                *lastError = i18n("StemTeX profiles directory was not found: %1", QDir::toNativeSeparators(root));
+        QSet<QString> seenPaths;
+        QStringList missingRoots;
+        const auto appendProfiles = [&](const QString &root, const QString &idPrefix, bool userManaged) {
+            const QDir profilesDir(root);
+            if (!profilesDir.exists()) {
+                missingRoots << QDir::toNativeSeparators(root);
+                return;
             }
-            return profiles;
-        }
 
-        const QFileInfoList candidates = profilesDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-        for (const QFileInfo &candidate : candidates) {
-            StemTeXProfileInfo profile;
-            if (readProfileInfo(api, candidate.absoluteFilePath(), &profile, lastError)) {
-                profiles << profile;
+            const QFileInfoList candidates = profilesDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+            for (const QFileInfo &candidate : candidates) {
+                const QString path = QDir::cleanPath(candidate.absoluteFilePath());
+                if (seenPaths.contains(path)) {
+                    continue;
+                }
+                StemTeXProfileInfo profile;
+                if (readProfileInfo(api, path, idPrefix, userManaged, &profile, lastError)) {
+                    profiles << profile;
+                    seenPaths.insert(path);
+                }
             }
+        };
+
+        appendProfiles(bundledProfilesRoot(), QStringLiteral("bundled"), false);
+        appendProfiles(userProfilesRoot(), QStringLiteral("user"), true);
+        if (profiles.isEmpty() && lastError && !missingRoots.isEmpty()) {
+            *lastError = i18n("StemTeX profile directories were not found: %1", missingRoots.join(QStringLiteral(", ")));
         }
         return profiles;
     }
@@ -765,7 +804,7 @@ private:
         const QString explicitProfileRoot = environmentPath("MENGSHEE_STEMTEX_PROFILE_ROOT");
         if (!explicitProfileRoot.isEmpty()) {
             StemTeXProfileInfo explicitProfile;
-            return readProfileInfo(api, explicitProfileRoot, &explicitProfile, error) ? explicitProfile.path : QString();
+            return readProfileInfo(api, explicitProfileRoot, QStringLiteral("external"), false, &explicitProfile, error) ? explicitProfile.path : QString();
         }
 
         QStringList preferredNames;
@@ -776,15 +815,14 @@ private:
         } else if (!configuredProfileName.isEmpty()) {
             preferredNames << configuredProfileName;
         }
-        preferredNames << QStringLiteral("unicodemath_cjk") << QStringLiteral("physics_cjk") << QStringLiteral("cjk_math_light") << QStringLiteral("math_light") << QStringLiteral("stem_units") << QStringLiteral("chemistry")
-                       << QStringLiteral("unicodemath");
+        preferredNames << QStringLiteral("bundled:unicodemath") << QStringLiteral("unicodemath");
         preferredNames.removeDuplicates();
 
         QString lastError;
         const QList<StemTeXProfileInfo> profiles = availableProfiles(api, &lastError);
         for (const QString &name : preferredNames) {
             for (const StemTeXProfileInfo &profile : profiles) {
-                if (profile.name.compare(name, Qt::CaseInsensitive) == 0 || QFileInfo(profile.path).fileName().compare(name, Qt::CaseInsensitive) == 0) {
+                if (profile.id.compare(name, Qt::CaseInsensitive) == 0 || profile.name.compare(name, Qt::CaseInsensitive) == 0 || QFileInfo(profile.path).fileName().compare(name, Qt::CaseInsensitive) == 0) {
                     return profile.path;
                 }
             }
@@ -794,8 +832,7 @@ private:
         }
 
         if (error) {
-            const QString root = profilesRoot();
-            *error = lastError.isEmpty() ? i18n("No valid StemTeX profile was found in %1", QDir::toNativeSeparators(root)) : lastError;
+            *error = lastError.isEmpty() ? i18n("No valid bundled or user StemTeX profile was found.") : lastError;
         }
         return {};
     }
@@ -1055,10 +1092,37 @@ void LatexRenderer::prewarmStemTeX()
 #endif
 }
 
-QStringList LatexRenderer::stemTeXProfileNames()
+QList<StemTeXProfile> LatexRenderer::stemTeXProfiles()
 {
 #ifdef Q_OS_WIN
-    return StemtexRendererSession::availableProfileNames();
+    return StemtexRendererSession::availableProfileRecords();
+#else
+    return {};
+#endif
+}
+
+QString LatexRenderer::stemTeXRuntimeRoot()
+{
+#ifdef Q_OS_WIN
+    return StemtexRendererSession::resolvedRuntimeRoot();
+#else
+    return {};
+#endif
+}
+
+QString LatexRenderer::stemTeXUserProfilesRoot()
+{
+#ifdef Q_OS_WIN
+    return StemtexRendererSession::managedUserProfilesRoot();
+#else
+    return {};
+#endif
+}
+
+QString LatexRenderer::stemTeXProfileCreatorExecutable()
+{
+#ifdef Q_OS_WIN
+    return QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("stemtex-profile-creator.exe"));
 #else
     return {};
 #endif

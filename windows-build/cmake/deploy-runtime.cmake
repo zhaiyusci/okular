@@ -47,15 +47,30 @@ function(mengshee_find_stemtex_root out_var)
     list(APPEND _candidates "${_documents_root}/xetex/stemtex")
 
     foreach(_candidate IN LISTS _candidates)
-        if(EXISTS "${_candidate}/cpp-daemon/stemtex_renderer.h"
-            AND (IS_DIRECTORY "${_candidate}/staging/runtime"
-                OR IS_DIRECTORY "${_candidate}/dist/stemtex-installer/StemTeX/runtime"))
+        if(NOT (EXISTS "${_candidate}/cpp-daemon/stemtex_renderer.h" AND EXISTS "${_candidate}/VERSION"))
+            continue()
+        endif()
+
+        if(DEFINED STEMTEX_STAGE_ROOT AND NOT "${STEMTEX_STAGE_ROOT}" STREQUAL "")
+            if(NOT EXISTS "${STEMTEX_STAGE_ROOT}/runtime/VERSION")
+                continue()
+            endif()
+            file(READ "${_candidate}/VERSION" _candidate_version)
+            file(READ "${STEMTEX_STAGE_ROOT}/runtime/VERSION" _stage_version)
+            string(STRIP "${_candidate_version}" _candidate_version)
+            string(STRIP "${_stage_version}" _stage_version)
+            if(NOT _candidate_version STREQUAL _stage_version)
+                continue()
+            endif()
+        elseif(NOT IS_DIRECTORY "${_candidate}/staging/runtime")
+            continue()
+        endif()
+
             get_filename_component(_stemtex "${_candidate}" ABSOLUTE)
             set(${out_var} "${_stemtex}" PARENT_SCOPE)
             return()
-        endif()
     endforeach()
-    message(FATAL_ERROR "Cannot find StemTeX source/staging tree. Pass -DSTEMTEX_ROOT=<path>.")
+    message(FATAL_ERROR "Cannot find a StemTeX source tree matching the fresh stage. Pass -DSTEMTEX_ROOT=<source> and optionally -DSTEMTEX_STAGE_ROOT=<stage>.")
 endfunction()
 
 function(mengshee_find_qscintilla_root out_var)
@@ -65,6 +80,9 @@ function(mengshee_find_qscintilla_root out_var)
     endif()
     if(DEFINED ENV{MENGSHEE_QSCINTILLA_ROOT})
         list(APPEND _candidates "$ENV{MENGSHEE_QSCINTILLA_ROOT}")
+    endif()
+    if(DEFINED STEMTEX_ROOT AND NOT "${STEMTEX_ROOT}" STREQUAL "")
+        list(APPEND _candidates "${STEMTEX_ROOT}/third_party")
     endif()
     if(DEFINED STEMTEX_ROOT_RESOLVED AND NOT "${STEMTEX_ROOT_RESOLVED}" STREQUAL "")
         list(APPEND _candidates "${STEMTEX_ROOT_RESOLVED}/third_party")
@@ -81,43 +99,52 @@ function(mengshee_find_qscintilla_root out_var)
     message(FATAL_ERROR "Cannot find StemTeX QScintilla runtime. Pass -DQSCINTILLA_ROOT=<path>.")
 endfunction()
 
-function(mengshee_resolve_stemtex_runtime out_var root)
-    foreach(_candidate IN ITEMS
-        "${root}/dist/stemtex-installer/StemTeX/runtime"
-        "${root}/staging/runtime"
-        "${root}/dist/stemtex-texlive-daemon-static"
+function(mengshee_resolve_stemtex_stage out_var root)
+    if(DEFINED STEMTEX_STAGE_ROOT AND NOT "${STEMTEX_STAGE_ROOT}" STREQUAL "")
+        get_filename_component(_stage "${STEMTEX_STAGE_ROOT}" ABSOLUTE)
+    else()
+        get_filename_component(_stage "${root}/staging" ABSOLUTE)
+    endif()
+
+    foreach(_required IN ITEMS
+        "runtime/VERSION"
+        "runtime/bin/sdk/stemtex-renderer.dll"
+        "runtime/bin/sdk/stemtex-profile.dll"
+        "runtime/bin/windows/stemtex-worker-host.exe"
+        "runtime/bin/windows/xetexdaemon.exe"
+        "runtime/bin/windows/xdvipdfmxdaemon.exe"
+        "runtime/bin/windows/dvipdfmxdaemon.dll"
+        "runtime/bin/windows/dvisvgmdaemon.exe"
+        "runtime/bin/windows/dvisvgmdaemon.dll"
+        "gui/stemtex-profile-creator.exe"
+        "gui/profiles/unicodemath/preamble.tex"
+        "gui/profiles/unicodemath/warmup.tex"
     )
-        if(EXISTS "${_candidate}/bin/sdk/stemtex-renderer.dll"
-            AND EXISTS "${_candidate}/bin/windows/stemtex-worker-host.exe"
-            AND EXISTS "${_candidate}/bin/windows/xetexdaemon.exe"
-            AND EXISTS "${_candidate}/bin/windows/xdvipdfmxdaemon.exe"
-            AND EXISTS "${_candidate}/bin/windows/dvipdfmxdaemon.dll"
-            AND EXISTS "${_candidate}/bin/windows/dvisvgmdaemon.exe"
-            AND EXISTS "${_candidate}/bin/windows/dvisvgmdaemon.dll")
-            get_filename_component(_runtime "${_candidate}" ABSOLUTE)
-            set(${out_var} "${_runtime}" PARENT_SCOPE)
-            return()
+        if(NOT EXISTS "${_stage}/${_required}")
+            message(FATAL_ERROR "StemTeX stage is incomplete: missing ${_required} under ${_stage}.")
         endif()
     endforeach()
-    message(FATAL_ERROR "Cannot find a staged StemTeX runtime under ${root}.")
-endfunction()
 
-function(mengshee_resolve_stemtex_profiles out_var root)
-    foreach(_candidate IN ITEMS
-        "${root}/dist/stemtex-installer/StemTeX/gui/profiles"
-        "${root}/staging/gui/profiles"
-        "${root}/gui/profiles"
+    file(READ "${root}/VERSION" _source_version)
+    file(READ "${_stage}/runtime/VERSION" _stage_version)
+    string(STRIP "${_source_version}" _source_version)
+    string(STRIP "${_stage_version}" _stage_version)
+    if(NOT _source_version STREQUAL _stage_version)
+        message(FATAL_ERROR "StemTeX stage version ${_stage_version} does not match source version ${_source_version}: ${_stage}")
+    endif()
+
+    file(GLOB_RECURSE _generated_profile_files
+        "${_stage}/gui/profiles/*.aux"
+        "${_stage}/gui/profiles/*.log"
+        "${_stage}/gui/profiles/*.pdf"
+        "${_stage}/gui/profiles/*.xdv"
+        "${_stage}/gui/profiles/*.synctex.gz"
     )
-        file(GLOB _profiles LIST_DIRECTORIES true "${_candidate}/*")
-        foreach(_profile IN LISTS _profiles)
-            if(EXISTS "${_profile}/preamble.tex" AND EXISTS "${_profile}/warmup.tex")
-                get_filename_component(_profiles_root "${_candidate}" ABSOLUTE)
-                set(${out_var} "${_profiles_root}" PARENT_SCOPE)
-                return()
-            endif()
-        endforeach()
-    endforeach()
-    message(FATAL_ERROR "Cannot find staged StemTeX profiles under ${root}.")
+    if(_generated_profile_files)
+        message(FATAL_ERROR "StemTeX stage contains generated profile output and is not valid release input: ${_generated_profile_files}")
+    endif()
+
+    set(${out_var} "${_stage}" PARENT_SCOPE)
 endfunction()
 
 function(mengshee_remove_inside path allowed_root)
@@ -295,8 +322,9 @@ set(QT_PREFIX "${QT_PREFIX_RESOLVED}")
 mengshee_find_stemtex_root(STEMTEX_ROOT_RESOLVED)
 set(STEMTEX_ROOT "${STEMTEX_ROOT_RESOLVED}")
 mengshee_find_qscintilla_root(QSCINTILLA_ROOT_RESOLVED)
-mengshee_resolve_stemtex_runtime(STEMTEX_RUNTIME_SOURCE "${STEMTEX_ROOT}")
-mengshee_resolve_stemtex_profiles(STEMTEX_PROFILES_SOURCE "${STEMTEX_ROOT}")
+mengshee_resolve_stemtex_stage(STEMTEX_STAGE_ROOT_RESOLVED "${STEMTEX_ROOT}")
+set(STEMTEX_RUNTIME_SOURCE "${STEMTEX_STAGE_ROOT_RESOLVED}/runtime")
+set(STEMTEX_BASIC_PROFILE_SOURCE "${STEMTEX_STAGE_ROOT_RESOLVED}/gui/profiles/unicodemath")
 
 find_program(WINDEPLOYQT_EXECUTABLE NAMES windeployqt.exe HINTS "${QT_PREFIX}/bin")
 if(DEFINED WINDEPLOYQT AND NOT "${WINDEPLOYQT}" STREQUAL "")
@@ -317,6 +345,7 @@ message(STATUS "  QtPrefix  : ${QT_PREFIX}")
 message(STATUS "  SdkPrefix : ${SDK_PREFIX}")
 message(STATUS "  Install   : ${INSTALL_PREFIX}")
 message(STATUS "  StemTeX   : ${STEMTEX_ROOT}")
+message(STATUS "  StemStage : ${STEMTEX_STAGE_ROOT_RESOLVED}")
 message(STATUS "  QScintilla: ${QSCINTILLA_ROOT_RESOLVED}")
 
 mengshee_remove_inside("${INSTALL_PREFIX}/bin/data/mengshee/microtex" "${INSTALL_PREFIX}")
@@ -365,8 +394,9 @@ mengshee_remove_inside("${INSTALL_PREFIX}/plugins" "${INSTALL_PREFIX}")
 mengshee_remove_inside("${INSTALL_PREFIX}/lib/plugins" "${INSTALL_PREFIX}")
 
 mengshee_remove_matching_files("${_bin_dir}" "Qt6*.dll")
+file(REMOVE "${_bin_dir}/dxcompiler.dll" "${_bin_dir}/dxil.dll")
 execute_process(
-    COMMAND "${WINDEPLOYQT_EXECUTABLE}" --no-translations --no-system-d3d-compiler --no-compiler-runtime --no-opengl-sw "${_exe}"
+    COMMAND "${WINDEPLOYQT_EXECUTABLE}" --no-translations --no-system-d3d-compiler --no-system-dxc-compiler --no-compiler-runtime --no-opengl-sw "${_exe}"
     RESULT_VARIABLE _windeployqt_result
 )
 if(NOT _windeployqt_result EQUAL 0)
@@ -387,7 +417,8 @@ mengshee_write_qt_conf("${_bin_dir}")
 mengshee_remove_inside("${INSTALL_PREFIX}/StemTeX/runtime" "${INSTALL_PREFIX}")
 mengshee_remove_inside("${INSTALL_PREFIX}/StemTeX/gui/profiles" "${INSTALL_PREFIX}")
 mengshee_copy_tree_contents("${STEMTEX_RUNTIME_SOURCE}" "${INSTALL_PREFIX}/StemTeX/runtime")
-mengshee_copy_tree_contents("${STEMTEX_PROFILES_SOURCE}" "${INSTALL_PREFIX}/StemTeX/gui/profiles")
+mengshee_copy_tree_contents("${STEMTEX_BASIC_PROFILE_SOURCE}" "${INSTALL_PREFIX}/StemTeX/gui/profiles/unicodemath")
+mengshee_copy_file("${STEMTEX_STAGE_ROOT_RESOLVED}/gui/stemtex-profile-creator.exe" "${_bin_dir}/stemtex-profile-creator.exe")
 mengshee_remove_inside("${INSTALL_PREFIX}/bin/data/icons/breeze" "${INSTALL_PREFIX}")
 mengshee_remove_inside("${INSTALL_PREFIX}/bin/data/icons/breeze-dark" "${INSTALL_PREFIX}")
 mengshee_copy_mengshee_runtime_data("${INSTALL_PREFIX}")

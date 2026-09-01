@@ -13,20 +13,30 @@
 #include <KLocalizedString>
 
 #include <QComboBox>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
+#include <QProcess>
 #include <QPushButton>
+#include <QSet>
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QUrl>
 
 namespace
 {
+constexpr int stemTeXProfileNameRole = Qt::UserRole + 1;
+constexpr int stemTeXProfileDirectoryNameRole = Qt::UserRole + 2;
+
 QString stemTeXLightHtml(bool ok)
 {
     return QStringLiteral("<span style=\"color:%1;font-size:14px;\">&#9679;</span>").arg(ok ? QStringLiteral("#179c48") : QStringLiteral("#c62828"));
@@ -99,7 +109,12 @@ DlgAnnotations::DlgAnnotations(QWidget *parent)
     m_stemTeXProfileNameEdit = new QLineEdit(this);
     m_stemTeXProfileNameEdit->setObjectName(QStringLiteral("kcfg_LatexStemtexProfileName"));
     m_stemTeXProfileNameEdit->hide();
+    m_stemTeXProfileNameEdit->setText(Okular::Settings::latexStemtexProfileName());
 
+    auto *profileRow = new QWidget(this);
+    auto *profileLayout = new QHBoxLayout(profileRow);
+    profileLayout->setContentsMargins(0, 0, 0, 0);
+    profileLayout->setSpacing(6);
     m_stemTeXProfileCombo = new QComboBox(this);
     reloadStemTeXProfiles();
     connect(m_stemTeXProfileCombo, &QComboBox::currentIndexChanged, this, [this]() {
@@ -109,27 +124,40 @@ DlgAnnotations::DlgAnnotations(QWidget *parent)
         m_stemTeXProfileNameEdit->setText(m_stemTeXProfileCombo->currentData().toString());
     });
     connect(m_stemTeXProfileNameEdit, &QLineEdit::textChanged, this, &DlgAnnotations::syncStemTeXProfileCombo);
-    m_stemTeXProfileNameEdit->setText(Okular::Settings::latexStemtexProfileName());
     syncStemTeXProfileCombo(m_stemTeXProfileNameEdit->text());
-    layout->addRow(i18nc("@label:listbox Config dialog, annotations page", "StemTeX profile:"), m_stemTeXProfileCombo);
+    m_stemTeXProfileCreatorButton = new QPushButton(i18nc("@action:button Config dialog, annotations page", "Create..."), profileRow);
+    connect(m_stemTeXProfileCreatorButton, &QPushButton::clicked, this, &DlgAnnotations::launchStemTeXProfileCreator);
+    auto *openProfilesButton = new QPushButton(i18nc("@action:button Config dialog, annotations page", "Open Folder"), profileRow);
+    connect(openProfilesButton, &QPushButton::clicked, this, [this]() {
+        const QString profilesRoot = GuiUtils::LatexRenderer::stemTeXUserProfilesRoot();
+        QDir().mkpath(profilesRoot);
+        QDesktopServices::openUrl(QUrl::fromLocalFile(profilesRoot));
+    });
+    const QString profilesRoot = GuiUtils::LatexRenderer::stemTeXUserProfilesRoot();
+    m_stemTeXProfileCreatorButton->setToolTip(i18nc("@info:tooltip Config dialog, annotations page", "Create a user profile under %1", QDir::toNativeSeparators(profilesRoot)));
+    openProfilesButton->setToolTip(i18nc("@info:tooltip Config dialog, annotations page", "Open the Mengshee user profile directory: %1", QDir::toNativeSeparators(profilesRoot)));
+    profileLayout->addWidget(m_stemTeXProfileCombo, 1);
+    profileLayout->addWidget(m_stemTeXProfileCreatorButton);
+    profileLayout->addWidget(openProfilesButton);
+    layout->addRow(i18nc("@label:listbox Config dialog, annotations page", "StemTeX profile:"), profileRow);
 
     auto *texmfRow = new QWidget(this);
     auto *texmfLayout = new QHBoxLayout(texmfRow);
     texmfLayout->setContentsMargins(0, 0, 0, 0);
     texmfLayout->setSpacing(6);
-    auto *texmfRoot = new QLineEdit(texmfRow);
-    texmfRoot->setObjectName(QStringLiteral("kcfg_LatexStemtexTexmfRoot"));
-    texmfRoot->setPlaceholderText(i18nc("@info:placeholder Config dialog, annotations page", "Leave empty to use bundled StemTeX TeX tree"));
-    texmfRoot->setToolTip(i18nc("@info:tooltip Config dialog, annotations page", "Directory containing texmf-dist. Empty uses %1.", QDir::toNativeSeparators(GuiUtils::LatexRenderer::defaultStemTeXTexmfRoot())));
+    m_stemTeXTexmfRootEdit = new QLineEdit(texmfRow);
+    m_stemTeXTexmfRootEdit->setObjectName(QStringLiteral("kcfg_LatexStemtexTexmfRoot"));
+    m_stemTeXTexmfRootEdit->setPlaceholderText(i18nc("@info:placeholder Config dialog, annotations page", "Leave empty to use bundled StemTeX TeX tree"));
+    m_stemTeXTexmfRootEdit->setToolTip(i18nc("@info:tooltip Config dialog, annotations page", "Directory containing texmf-dist. Empty uses %1.", QDir::toNativeSeparators(GuiUtils::LatexRenderer::defaultStemTeXTexmfRoot())));
     auto *browseTexmf = new QPushButton(i18nc("@action:button Config dialog, annotations page", "Browse..."), texmfRow);
-    connect(browseTexmf, &QPushButton::clicked, this, [this, texmfRoot]() {
-        const QString start = texmfRoot->text().trimmed().isEmpty() ? GuiUtils::LatexRenderer::defaultStemTeXTexmfRoot() : texmfRoot->text().trimmed();
+    connect(browseTexmf, &QPushButton::clicked, this, [this]() {
+        const QString start = m_stemTeXTexmfRootEdit->text().trimmed().isEmpty() ? GuiUtils::LatexRenderer::defaultStemTeXTexmfRoot() : m_stemTeXTexmfRootEdit->text().trimmed();
         const QString selected = QFileDialog::getExistingDirectory(this, i18nc("@title:window Config dialog, annotations page", "Select TeXLive package/font tree"), start);
         if (!selected.isEmpty()) {
-            texmfRoot->setText(QDir::toNativeSeparators(QDir::cleanPath(selected)));
+            m_stemTeXTexmfRootEdit->setText(QDir::toNativeSeparators(QDir::cleanPath(selected)));
         }
     });
-    texmfLayout->addWidget(texmfRoot, 1);
+    texmfLayout->addWidget(m_stemTeXTexmfRootEdit, 1);
     texmfLayout->addWidget(browseTexmf);
     layout->addRow(i18nc("@label:textbox Config dialog, annotations page", "StemTeX TeX tree:"), texmfRow);
 
@@ -162,21 +190,101 @@ void DlgAnnotations::reloadStemTeXProfiles()
         return;
     }
 
-    const QString currentProfile = Okular::Settings::latexStemtexProfileName().trimmed();
+    const QString currentProfile = m_stemTeXProfileNameEdit ? m_stemTeXProfileNameEdit->text().trimmed() : Okular::Settings::latexStemtexProfileName().trimmed();
+    const QSignalBlocker blocker(m_stemTeXProfileCombo);
     m_stemTeXProfileCombo->clear();
     m_stemTeXProfileCombo->addItem(i18nc("@item:inlistbox Config dialog, annotations page", "Auto (recommended bundled profile)"), QString());
 
-    const QStringList profiles = GuiUtils::LatexRenderer::stemTeXProfileNames();
-    for (const QString &profile : profiles) {
-        m_stemTeXProfileCombo->addItem(profile, profile);
+    const QList<GuiUtils::StemTeXProfile> profiles = GuiUtils::LatexRenderer::stemTeXProfiles();
+    QStringList profileIds;
+    QString resolvedCurrentProfile = currentProfile;
+    for (const GuiUtils::StemTeXProfile &profile : profiles) {
+        const QString label = profile.userManaged ? i18nc("@item:inlistbox Config dialog, annotations page", "%1 (user)", profile.name) : i18nc("@item:inlistbox Config dialog, annotations page", "%1 (bundled)", profile.name);
+        m_stemTeXProfileCombo->addItem(label, profile.id);
+        m_stemTeXProfileCombo->setItemData(m_stemTeXProfileCombo->count() - 1, QDir::toNativeSeparators(profile.path), Qt::ToolTipRole);
+        m_stemTeXProfileCombo->setItemData(m_stemTeXProfileCombo->count() - 1, profile.name, stemTeXProfileNameRole);
+        m_stemTeXProfileCombo->setItemData(m_stemTeXProfileCombo->count() - 1, QFileInfo(profile.path).fileName(), stemTeXProfileDirectoryNameRole);
+        profileIds << profile.id;
+        if (resolvedCurrentProfile == currentProfile && !currentProfile.contains(QLatin1Char(':')) && (profile.name.compare(currentProfile, Qt::CaseInsensitive) == 0 || QFileInfo(profile.path).fileName().compare(currentProfile, Qt::CaseInsensitive) == 0)) {
+            resolvedCurrentProfile = profile.id;
+        }
     }
 
-    if (!currentProfile.isEmpty() && !profiles.contains(currentProfile)) {
-        m_stemTeXProfileCombo->addItem(i18nc("@item:inlistbox Config dialog, annotations page", "Missing: %1", currentProfile), currentProfile);
+    if (resolvedCurrentProfile != currentProfile && m_stemTeXProfileNameEdit) {
+        m_stemTeXProfileNameEdit->setText(resolvedCurrentProfile);
+    }
+    if (!resolvedCurrentProfile.isEmpty() && !profileIds.contains(resolvedCurrentProfile)) {
+        m_stemTeXProfileCombo->addItem(i18nc("@item:inlistbox Config dialog, annotations page", "Missing: %1", resolvedCurrentProfile), resolvedCurrentProfile);
     }
 
     m_stemTeXProfileCombo->setEnabled(!profiles.isEmpty());
-    m_stemTeXProfileCombo->setToolTip(profiles.isEmpty() ? i18nc("@info:tooltip Config dialog, annotations page", "No bundled StemTeX profiles were found.") : QString());
+    m_stemTeXProfileCombo->setToolTip(profiles.isEmpty() ? i18nc("@info:tooltip Config dialog, annotations page", "No bundled or Mengshee user StemTeX profiles were found.") : QString());
+}
+
+void DlgAnnotations::launchStemTeXProfileCreator()
+{
+    const QString executable = GuiUtils::LatexRenderer::stemTeXProfileCreatorExecutable();
+    if (!QFileInfo::exists(executable)) {
+        QMessageBox::warning(this, i18nc("@title:window", "StemTeX Profile Creator"), i18n("StemTeX Profile Creator was not found: %1", QDir::toNativeSeparators(executable)));
+        return;
+    }
+
+    const QString profilesRoot = GuiUtils::LatexRenderer::stemTeXUserProfilesRoot();
+    if (!QDir().mkpath(profilesRoot)) {
+        QMessageBox::warning(this, i18nc("@title:window", "StemTeX Profile Creator"), i18n("Could not create the Mengshee profile directory: %1", QDir::toNativeSeparators(profilesRoot)));
+        return;
+    }
+
+    QSet<QString> existingUserProfileIds;
+    const QList<GuiUtils::StemTeXProfile> existingProfiles = GuiUtils::LatexRenderer::stemTeXProfiles();
+    for (const GuiUtils::StemTeXProfile &profile : existingProfiles) {
+        if (profile.userManaged) {
+            existingUserProfileIds.insert(profile.id);
+        }
+    }
+
+    const QString texmfRoot = m_stemTeXTexmfRootEdit && !m_stemTeXTexmfRootEdit->text().trimmed().isEmpty() ? QDir::cleanPath(QDir(m_stemTeXTexmfRootEdit->text().trimmed()).absolutePath()) : GuiUtils::LatexRenderer::defaultStemTeXTexmfRoot();
+    if (!QFileInfo::exists(QDir(texmfRoot).filePath(QStringLiteral("texmf-dist/web2c")))) {
+        QMessageBox::warning(this,
+                             i18nc("@title:window", "StemTeX Profile Creator"),
+                             i18n("The selected TeX tree is not available: %1\n\nInstall the Mengshee StemTeX support package or select a TeX Live tree before creating a profile.", QDir::toNativeSeparators(texmfRoot)));
+        return;
+    }
+    auto *process = new QProcess(this);
+    process->setProgram(executable);
+    process->setArguments({QStringLiteral("--runtime"), GuiUtils::LatexRenderer::stemTeXRuntimeRoot(), QStringLiteral("--texmf"), texmfRoot, QStringLiteral("--profiles"), profilesRoot});
+    process->setWorkingDirectory(QFileInfo(executable).absolutePath());
+    m_stemTeXProfileCreatorButton->setEnabled(false);
+
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) {
+            QMessageBox::warning(this, i18nc("@title:window", "StemTeX Profile Creator"), i18n("Could not start StemTeX Profile Creator: %1", process->errorString()));
+            m_stemTeXProfileCreatorButton->setEnabled(true);
+            process->deleteLater();
+        }
+    });
+    connect(process, &QProcess::finished, this, [this, process, existingUserProfileIds](int, QProcess::ExitStatus exitStatus) {
+        m_stemTeXProfileCreatorButton->setEnabled(true);
+        if (exitStatus == QProcess::CrashExit) {
+            QMessageBox::warning(this, i18nc("@title:window", "StemTeX Profile Creator"), i18n("StemTeX Profile Creator exited unexpectedly."));
+        }
+
+        QStringList newProfileIds;
+        const QList<GuiUtils::StemTeXProfile> profiles = GuiUtils::LatexRenderer::stemTeXProfiles();
+        for (const GuiUtils::StemTeXProfile &profile : profiles) {
+            if (profile.userManaged && !existingUserProfileIds.contains(profile.id)) {
+                newProfileIds << profile.id;
+            }
+        }
+        reloadStemTeXProfiles();
+        if (newProfileIds.size() == 1) {
+            m_stemTeXProfileNameEdit->setText(newProfileIds.constFirst());
+        } else {
+            syncStemTeXProfileCombo(m_stemTeXProfileNameEdit->text());
+        }
+        process->deleteLater();
+    });
+    process->start();
 }
 
 void DlgAnnotations::syncStemTeXProfileCombo(const QString &profileName)
@@ -187,7 +295,12 @@ void DlgAnnotations::syncStemTeXProfileCombo(const QString &profileName)
 
     const QString target = profileName.trimmed();
     for (int i = 0; i < m_stemTeXProfileCombo->count(); ++i) {
-        if (m_stemTeXProfileCombo->itemData(i).toString() == target) {
+        const QString profileId = m_stemTeXProfileCombo->itemData(i).toString();
+        const bool legacyNameMatch = !target.contains(QLatin1Char(':')) && (m_stemTeXProfileCombo->itemData(i, stemTeXProfileNameRole).toString().compare(target, Qt::CaseInsensitive) == 0 || m_stemTeXProfileCombo->itemData(i, stemTeXProfileDirectoryNameRole).toString().compare(target, Qt::CaseInsensitive) == 0);
+        if (profileId == target || legacyNameMatch) {
+            if (legacyNameMatch && m_stemTeXProfileNameEdit && m_stemTeXProfileNameEdit->text() != profileId) {
+                m_stemTeXProfileNameEdit->setText(profileId);
+            }
             if (m_stemTeXProfileCombo->currentIndex() != i) {
                 m_stemTeXProfileCombo->setCurrentIndex(i);
             }

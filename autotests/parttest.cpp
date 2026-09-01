@@ -15,6 +15,7 @@
 #include "../core/action.h"
 #include "../core/annotations.h"
 #include "../core/document_p.h"
+#include "../core/fileprinter.h"
 #include "../core/form.h"
 #include "../core/misc.h"
 #include "../core/page.h"
@@ -41,7 +42,9 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPageRanges>
 #include <QPushButton>
+#include <QPrinter>
 #include <QScrollBar>
 #include <QTabletEvent>
 #include <QTemporaryDir>
@@ -118,6 +121,7 @@ private Q_SLOTS:
     void testWorkspaceMainViewRetainsPositionWhenDemoted();
     void testTabletProximityBehavior();
     void testOpenPrintPreview();
+    void testDisjointPrintPageRanges();
     void testMouseModeMenu();
     void testFullScreenRequest();
     void testZoomInFacingPages();
@@ -682,8 +686,6 @@ void PartTest::testClickInternalLink()
 
 void PartTest::testAuxiliaryDocumentWorkspace()
 {
-    Okular::Settings::setModifiedLinkClickAction(Okular::Settings::EnumModifiedLinkClickAction::AuxiliaryFrame);
-
     Okular::Part part(nullptr, {});
     QVERIFY(openDocument(&part, QStringLiteral(KDESRCDIR "data/pdf_with_internal_links.pdf")));
     part.widget()->show();
@@ -2834,8 +2836,28 @@ void PartTest::testOpenPrintPreview()
     }
 
     QVERIFY(QTest::qWaitForWindowExposed(part.widget()));
+#ifdef Q_OS_WIN
+    TestingUtils::CloseDialogHelper closeDialogHelper(QDialogButtonBox::Cancel);
+#else
     TestingUtils::CloseDialogHelper closeDialogHelper(QDialogButtonBox::Close);
+#endif
     part.slotPrintPreview();
+}
+
+void PartTest::testDisjointPrintPageRanges()
+{
+    QPrinter printer(QPrinter::ScreenResolution);
+    printer.setOutputFormat(QPrinter::PdfFormat);
+    QPageRanges ranges;
+    ranges.addRange(1, 4);
+    ranges.addPage(8);
+    ranges.addRange(11, 13);
+    printer.setPrintRange(QPrinter::PageRange);
+    printer.setFromTo(1, 13);
+    printer.setPageRanges(ranges);
+
+    const QList<int> expectedPages = {1, 2, 3, 4, 8, 11, 12, 13};
+    QCOMPARE(Okular::FilePrinter::pageList(printer, 20, 1, {}), expectedPages);
 }
 
 void PartTest::testMouseModeMenu()

@@ -578,6 +578,7 @@ if(BUILD_DESKTOP)
     part/cursorwraphelper.cpp
     part/drawingtoolactions.cpp
     part/fileprinterpreview.cpp
+    part/mengsheeprintdialog.cpp
     part/findbar.cpp
     part/formwidgets.cpp
     part/kleopatraintegration.h

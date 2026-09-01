@@ -15,6 +15,50 @@ class QComboBox;
 
 namespace Okular
 {
+
+namespace PrintLayout
+{
+enum Mode {
+    Size,
+    Poster,
+    Multiple,
+    Booklet,
+};
+
+enum PageOrder {
+    Horizontal,
+    HorizontalReversed,
+    Vertical,
+    VerticalReversed,
+};
+
+enum BookletBinding {
+    BindLeft,
+    BindRight,
+};
+
+enum BookletSubset {
+    BothSides,
+    FrontSides,
+    BackSides,
+};
+
+inline constexpr char supportsProperty[] = "mengsheeSupportsPrintLayout";
+inline constexpr char modeProperty[] = "mengsheePrintLayoutMode";
+inline constexpr char pagesPerSheetProperty[] = "mengsheePagesPerSheet";
+inline constexpr char pageOrderProperty[] = "mengsheePageOrder";
+inline constexpr char pageBorderProperty[] = "mengsheePageBorder";
+inline constexpr char posterScaleProperty[] = "mengsheePosterScale";
+inline constexpr char posterOverlapProperty[] = "mengsheePosterOverlap";
+inline constexpr char posterCutMarksProperty[] = "mengsheePosterCutMarks";
+inline constexpr char bookletBindingProperty[] = "mengsheeBookletBinding";
+inline constexpr char bookletSubsetProperty[] = "mengsheeBookletSubset";
+inline constexpr char previewProperty[] = "mengsheePrintPreview";
+inline constexpr char previewSheetProperty[] = "mengsheePrintPreviewSheet";
+inline constexpr char previewSheetCountProperty[] = "mengsheePrintPreviewSheetCount";
+inline constexpr char previewViewportProperty[] = "mengsheePrintPreviewViewport";
+}
+
 /**
  * @short Abstract base class for an extra print options widget in the print dialog.
  */

@@ -6482,3 +6482,246 @@ msgstr ""
 "Mengshee 因意外的内部错误停止了当前操作。应用程序仍在运行，但建议先将当前工作保存到新文件，再继续操作。\n"
 "\n"
 "%1"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Printer"
+msgstr "打印机"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Printer:"
+msgstr "打印机："
+
+#: part/mengsheeprintdialog.cpp
+msgid "Copies:"
+msgstr "份数："
+
+#: part/mengsheeprintdialog.cpp
+msgid "Print in grayscale"
+msgstr "以灰度（黑白）打印"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Pages to Print"
+msgstr "要打印的页面"
+
+#: part/mengsheeprintdialog.cpp
+msgid "All pages"
+msgstr "所有页面"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Current page"
+msgstr "当前页面"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Pages:"
+msgstr "页面："
+
+#: part/mengsheeprintdialog.cpp
+msgid "Bookmarked pages"
+msgstr "已加书签的页面"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Page Sizing && Handling"
+msgstr "调整页面大小和处理页面"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Poster"
+msgstr "海报"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Multiple"
+msgstr "多页"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Booklet"
+msgstr "小册子"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Paper size:"
+msgstr "纸张大小："
+
+#: part/mengsheeprintdialog.cpp
+msgid "Print on both sides"
+msgstr "双面打印"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Binding:"
+msgstr "装订方式："
+
+#: part/mengsheeprintdialog.cpp
+msgid "Flip on long edge"
+msgstr "沿长边翻转"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Flip on short edge"
+msgstr "沿短边翻转"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Orientation:"
+msgstr "方向："
+
+#: part/mengsheeprintdialog.cpp
+msgid "Auto"
+msgstr "自动"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Portrait"
+msgstr "纵向"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Landscape"
+msgstr "横向"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Print"
+msgstr "打印"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Previous page"
+msgstr "上一页"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Next page"
+msgstr "下一页"
+
+#: part/mengsheeprintdialog.cpp
+#, kde-format
+msgid "Page %1 of %2"
+msgstr "第 %1 页，共 %2 页"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Unknown paper size"
+msgstr "未知纸张大小"
+
+#: part/mengsheeprintdialog.cpp
+msgid "This layout mode is not available yet."
+msgstr "此布局模式尚未提供。"
+
+#: part/mengsheeprintdialog.cpp
+#, kde-format
+msgid "Enter pages between 1 and %1."
+msgstr "请输入 1 到 %1 之间的页码。"
+
+#: part/mengsheeprintdialog.cpp
+msgid "For example: 1-4, 8, 11-13"
+msgstr "例如：1-4, 8, 11-13"
+
+#: part/mengsheeprintdialog.cpp
+#, kde-format
+msgctxt "Printer name followed by its status"
+msgid "%1 (Default)"
+msgstr "%1（默认）"
+
+#: part/mengsheeprintdialog.cpp
+#, kde-format
+msgctxt "Paper size and page orientation shown above print preview"
+msgid "%1 · %2"
+msgstr "%1 · %2"
+
+#: part/mengsheeprintdialog.cpp
+#, kde-format
+msgctxt "Paper name followed by width and height in millimeters"
+msgid "%1 (%2 × %3 mm)"
+msgstr "%1（%2 × %3 毫米）"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Print one document page on each sheet."
+msgstr "每张纸打印一个文档页面。"
+
+#: part/mengsheeprintdialog.cpp
+msgctxt "Percentage suffix"
+msgid "%"
+msgstr "%"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Tile scale:"
+msgstr "拼贴比例："
+
+#: part/mengsheeprintdialog.cpp
+msgctxt "Millimeter suffix"
+msgid " mm"
+msgstr " 毫米"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Overlap:"
+msgstr "重叠："
+
+#: part/mengsheeprintdialog.cpp
+msgid "Cut marks"
+msgstr "裁切标记"
+
+#: part/mengsheeprintdialog.cpp
+#, kde-format
+msgid "%1 page"
+msgid_plural "%1 pages"
+msgstr[0] "%1 页"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Pages per sheet:"
+msgstr "每张纸的页面数："
+
+#: part/mengsheeprintdialog.cpp
+msgid "Horizontal"
+msgstr "横向排列"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Horizontal reversed"
+msgstr "横向反序"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Vertical"
+msgstr "纵向排列"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Vertical reversed"
+msgstr "纵向反序"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Page order:"
+msgstr "页面顺序："
+
+#: part/mengsheeprintdialog.cpp
+msgid "Print page border"
+msgstr "打印页面边框"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Both sides"
+msgstr "正反两面"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Front sides only"
+msgstr "仅正面"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Back sides only"
+msgstr "仅反面"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Booklet subset:"
+msgstr "小册子范围："
+
+#: part/mengsheeprintdialog.cpp
+msgctxt "Booklet binding side"
+msgid "Left"
+msgstr "左侧"
+
+#: part/mengsheeprintdialog.cpp
+msgctxt "Booklet binding side"
+msgid "Right"
+msgstr "右侧"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Booklet binding:"
+msgstr "小册子装订："
+
+#: part/mengsheeprintdialog.cpp
+msgid "Previous sheet"
+msgstr "上一张纸"
+
+#: part/mengsheeprintdialog.cpp
+msgid "Next sheet"
+msgstr "下一张纸"
+
+#: part/mengsheeprintdialog.cpp
+#, kde-format
+msgid "Sheet %1 of %2"
+msgstr "第 %1 张，共 %2 张"

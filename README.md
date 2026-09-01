@@ -45,12 +45,13 @@ LaTeX workflow.
 - **StemTeX renderer integration**
   - Integrates [StemTeX](https://github.com/zhaiyusci/stemtex) as a fast XeTeX
     renderer for LaTeX notes.
-  - Uses rendering profiles for technical text, formulas, chemistry, physics,
-    and CJK content.
+  - Bundles only StemTeX's maintained `unicodemath` base profile.
+  - Launches StemTeX Profile Creator for user-selected fonts, packages, and
+    custom preambles, kept separate as Mengshee-managed user profiles.
   - Users may select an external TeX Live tree for packages and fonts.
   - Runtime state, fontconfig files, caches, traces, and rendered-note outputs
-    are written under a per-user temporary StemTeX directory, not under the
-    installation directory.
+    are written under Mengshee's per-user application-data directory, not under
+    the installation or StemTeX standalone-application directories.
 
 - **Template notes**
   - Stored as standard PDF FreeText annotations.
@@ -66,7 +67,8 @@ LaTeX workflow.
     streams.
 
 - **Internal-link previews**
-  - Internal PDF links can show a preview instead of immediately navigating.
+  - Internal PDF links can open in independent, splittable auxiliary panes
+    without moving the main reading position.
 
 ## Downloads
 

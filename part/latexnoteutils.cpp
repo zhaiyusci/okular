@@ -121,22 +121,13 @@ QString latexNoteBaseName(const QString &latexInput, const QColor &textColor, do
 
 QString latexTemporaryPath()
 {
-    QString tempPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    QString tempPath = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (tempPath.isEmpty()) {
-        tempPath = QDir::tempPath();
+        tempPath = QDir(QDir::tempPath()).filePath(QStringLiteral("mengshee"));
     }
-#ifdef Q_OS_UNIX
-    const QString homePath = QDir::homePath();
-    if (!homePath.isEmpty()) {
-        const QString absoluteTempPath = QDir(tempPath).absolutePath();
-        const QString absoluteHomePath = QDir(homePath).absolutePath();
-        if (absoluteTempPath == absoluteHomePath || absoluteTempPath.startsWith(absoluteHomePath + QLatin1Char('/'))) {
-            tempPath = QStringLiteral("/tmp");
-        }
-    }
-#endif
+    tempPath = QDir(tempPath).filePath(QStringLiteral("temporary"));
     QDir().mkpath(tempPath);
-    return tempPath;
+    return QDir::cleanPath(tempPath);
 }
 
 QTemporaryDir *latexAppearanceSessionRoot()

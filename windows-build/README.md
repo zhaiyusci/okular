@@ -36,13 +36,34 @@ Build output lives outside the source checkout under the sibling
 git submodule update --init --recursive external/poppler external/stemtex
 ```
 
-StemTeX is looked up in this order: an explicit `STEMTEX_ROOT`, the
+StemTeX source is looked up in this order: an explicit `STEMTEX_ROOT`, the
 `MENGSHEE_STEMTEX_SOURCE_ROOT` environment variable, `external/stemtex`, and
-then the legacy local development path outside the checkout.
+then the sibling StemTeX development checkout.
 
-The submodule supplies the StemTeX source tree. Packaging still expects StemTeX
-runtime outputs to have been staged under that tree, or under the explicit
-StemTeX root passed to the build.
+The submodule pins the required StemTeX version. Runtime deployment accepts only
+the canonical CMake `staging` layout and requires its `runtime\VERSION` to match
+the selected source tree. Old `dist\stemtex-installer` and daemon-static trees
+are not package inputs.
+
+For release work, install StemTeX into a fresh, version-specific directory and
+pass both paths to the Mengshee driver:
+
+```powershell
+$stemtexRoot = "C:\Users\jairy\Documents\xetex\stemtex"
+$stemtexVersion = (Get-Content "$stemtexRoot\VERSION").Trim()
+$stemtexStage = "C:\Users\jairy\Documents\okular\windows_build\stemtex\StemTeX-$stemtexVersion"
+
+if (Test-Path $stemtexStage) {
+  throw "StemTeX stage already exists: $stemtexStage"
+}
+
+& "C:\Qt\Tools\CMake_64\bin\cmake.exe" --install `
+  "$stemtexRoot\build\stemtex-ninja" --prefix $stemtexStage
+```
+
+Build and smoke-test StemTeX first using its own
+`docs\BUILDING_AND_PACKAGING.md`. A release stage containing generated profile
+`.xdv`, `.aux`, `.log`, or `.pdf` files is rejected.
 
 If using a non-default Visual Studio path, pass it to CMake scripts:
 
@@ -59,6 +80,8 @@ Use the CMake driver for normal Windows builds:
   -DQT_PREFIX=C:/Qt/6.11.1/msvc2022_64 `
   -DVCVARS="C:/Program Files/Microsoft Visual Studio/18/Community/VC/Auxiliary/Build/vcvars64.bat" `
   -DWORKSPACE_ROOT=C:/Users/jairy/Documents/okular/windows_build `
+  "-DSTEMTEX_ROOT=$stemtexRoot" `
+  "-DSTEMTEX_STAGE_ROOT=$stemtexStage" `
   -P windows-build/cmake/build-windows.cmake
 ```
 
@@ -85,7 +108,7 @@ If Inno Setup is not installed, still build and stage the runtime with:
 Expected installer output:
 
 ```text
-..\windows_build\dist\Mengshee-<version>-Setup.exe
+..\windows_build\dist\mengshee-<version>\Mengshee-<version>-Setup.exe
 ```
 
 ## CMake Package Step
@@ -104,10 +127,13 @@ rebuilding Mengshee:
 This script mirrors the deployed install tree into
 `..\windows_build\dist\mengshee-pdf\app`, validates Mengshee icons, gettext
 catalogs, annotation resources, and Poppler CMap/CID data, then calls Inno
-Setup. The main installer keeps the StemTeX renderer binaries and bundled
-profiles, but excludes the TeX package/font tree. That tree is staged separately
-under `..\windows_build\dist\mengshee-stemtex-support\app` and built as
-`Mengshee-<version>-StemTeX-Support.exe`.
+Setup. The main installer keeps the StemTeX renderer binaries and only the
+maintained `unicodemath` base profile in its required core component. The TeX
+package/font tree is staged
+under `..\windows_build\dist\mengshee-pdf\optional\stemtex-support` and embedded
+in the same installer as the optional `Bundled StemTeX TeX tree` component.
+The recommended installation type selects it by default; users can choose the
+compact type or clear the component when they want to use an external TeX tree.
 
 To validate staging without building an installer:
 
@@ -142,8 +168,8 @@ of the Windows pipeline.
 - `cmake\package-windows.cmake`
   - CMake-based stage and installer creation from an already deployed
     `..\windows_build\install\mengshee` tree.
-  - Builds both the main Mengshee installer and the optional StemTeX support
-    installer when the deployed StemTeX TeX tree is available.
+  - Builds one Mengshee installer containing the bundled StemTeX TeX tree as an
+    optional installation component.
 - `cmake\bootstrap-kf6-sdk.cmake`
   - CMake-based ECM bootstrap for the local Windows SDK.
 - `cmake\build-kf6-module.cmake`
@@ -154,22 +180,12 @@ of the Windows pipeline.
 - `cmake\install-gettext-native-sdk.cmake`,
   `cmake\install-winflexbison-sdk.cmake`
   - CMake-based pinned binary tool installers.
-- `build-mengshee-standalone.ps1`
-  - Legacy PowerShell build entry. Configures, builds, and installs Mengshee into
-    `..\windows_build\install\mengshee`.
-  - Produces CMake-installed files, including application translations and
-    Mengshee annotation resources.
-- `deploy-mengshee-standalone-runtime.ps1`
-  - Legacy PowerShell deploy entry. Copies Qt, KF6, Poppler, QScintilla, and
-    StemTeX runtime files into the install tree.
-  - Normalizes plugin layout under `bin\plugins`.
-  - Restores Mengshee runtime data after SDK data sync.
 - `smoke-test-mengshee-stage.ps1`
   - Starts staged `mengshee.exe` with a test PDF and verifies it loads modules
     from the stage, not from another workspace tree.
 
-The legacy Okular-named entry points were removed from this Windows line. New
-docs should point at the Mengshee-named scripts above.
+The legacy PowerShell build, deploy, and installer entry points have been
+removed. Use the CMake drivers above for all Windows builds and packages.
 
 ## Stage-Only Refresh
 
@@ -213,7 +229,10 @@ The deployed install tree and stage must contain:
 - `share\poppler\cMap\...`
 - `share\poppler\cidToUnicode\...`
 - `StemTeX\runtime\bin`
-- `StemTeX\gui\profiles`
+- `StemTeX\runtime\VERSION`
+- `StemTeX\runtime\bin\sdk\stemtex-profile.dll`
+- `StemTeX\gui\profiles\unicodemath`
+- `bin\stemtex-profile-creator.exe`
 
 The main stage must not contain `StemTeX\runtime\texmf-dist` or writable
 StemTeX cache/state directories such as `StemTeX\runtime\texmf-var\fonts`.
@@ -332,20 +351,27 @@ compatibility layer needed by KI18n.
 
 Mengshee supports the StemTeX renderer for LaTeX notes. The standalone Windows
 runtime bundles the StemTeX renderer binaries under `StemTeX\runtime\bin` with
-profiles under `StemTeX\gui\profiles`; Mengshee starts that renderer during
+only the maintained `unicodemath` base profile under
+`StemTeX\gui\profiles\unicodemath`; Mengshee starts that renderer during
 application startup.
 
-The TeXLive package/font tree is optional. Users can install
-`Mengshee-<version>-StemTeX-Support.exe` to add the bundled `texmf-dist` and
-`texmf-var` tree under `StemTeX\runtime`, or they can select their own TeX tree
-from `Settings -> Configure Mengshee -> Annotations`. An empty setting does not
-probe the system for TeX; it only uses the bundled support tree when that tree
-has been installed.
+The annotation settings page launches the bundled StemTeX Profile Creator with
+Mengshee-owned paths. The bundled base profile and user profiles have distinct
+stable IDs in the selector. User-created profiles are stored below Mengshee's Qt
+`AppLocalDataLocation`, under `StemTeX\profiles`; they are never written to the
+installation or StemTeX's global user-profile directory.
 
-StemTeX runtime state, fontconfig files, caches, traces, and rendered-note
-outputs are written below Mengshee's per-user temporary StemTeX directory, not
-below the installation directory. This keeps `C:\Program Files\Mengshee`
-read-only after installation.
+The TeXLive package/font tree is optional. The single Mengshee installer carries
+it as the `Bundled StemTeX TeX tree` component and selects it in the recommended
+installation type. Users can omit that component and select their own TeX tree
+from `Settings -> Configure Mengshee -> Annotations`. An empty setting does not
+probe the system for TeX; it only uses the bundled tree when that component was
+installed.
+
+StemTeX runtime state, fontconfig files, caches, traces, rendered-note outputs,
+and temporary LaTeX appearance files are written below Mengshee's Qt
+`AppLocalDataLocation`. This keeps `C:\Program Files\Mengshee` read-only and
+keeps Mengshee data out of StemTeX's standalone application directories.
 
 To inspect TeX rendering logs:
 

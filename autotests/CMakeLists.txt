@@ -84,11 +84,6 @@ if(BUILD_DESKTOP)
         TEST_NAME "annotationclipboardtest"
         LINK_LIBRARIES Qt6::Widgets Qt6::Test Qt6::Xml okularcore okularpart
     )
-
-    ecm_add_test(modifiedlinkclicksettingtest.cpp
-        TEST_NAME "modifiedlinkclicksettingtest"
-        LINK_LIBRARIES Qt6::Test KF6::ConfigCore okularpart
-    )
 endif()
 
 ecm_add_test(urldetecttest.cpp

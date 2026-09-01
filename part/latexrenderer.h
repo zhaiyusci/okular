@@ -10,6 +10,8 @@
 #ifndef LATEXRENDERER_H
 #define LATEXRENDERER_H
 
+#include <QList>
+#include <QString>
 #include <QStringList>
 
 class QString;
@@ -47,6 +49,13 @@ struct StemTeXStatus {
     QString note;
 };
 
+struct StemTeXProfile {
+    QString id;
+    QString name;
+    QString path;
+    bool userManaged = false;
+};
+
 class LatexRenderer
 {
 public:
@@ -66,7 +75,10 @@ public:
     QString lastWarningMessage() const;
     static bool mightContainLatex(const QString &text);
     static QString compactErrorMessage(const QString &latexOutput);
-    static QStringList stemTeXProfileNames();
+    static QList<StemTeXProfile> stemTeXProfiles();
+    static QString stemTeXRuntimeRoot();
+    static QString stemTeXUserProfilesRoot();
+    static QString stemTeXProfileCreatorExecutable();
     static QString defaultStemTeXTexmfRoot();
     static void prewarmStemTeX();
     static void restartStemTeX();

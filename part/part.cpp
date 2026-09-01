@@ -24,6 +24,7 @@
 
 #include "config-okular.h"
 #include "latexrenderer.h"
+#include "mengsheeprintdialog.h"
 
 // qt/kde includes
 #include <QApplication>
@@ -4610,6 +4611,12 @@ void Part::slotNewConfig()
 
 void Part::slotPrintPreview()
 {
+#ifdef Q_OS_WIN
+    // The Windows print workspace already includes a live preview. Keep both
+    // standard actions pointed at the same settings-aware experience.
+    slotPrint();
+    return;
+#else
     if (m_document->pages() == 0) {
         return;
     }
@@ -4639,6 +4646,7 @@ void Part::slotPrintPreview()
         Okular::FilePrinterPreview previewdlg(printer.outputFileName(), widget());
         previewdlg.exec();
     }
+#endif
 }
 
 void Part::slotShowTOCMenu(const Okular::DocumentViewport &vp, const QPoint point, const QString &title)
@@ -5111,6 +5119,24 @@ void Part::slotPrint()
         printConfigWidget = new DefaultPrintOptionsWidget();
     }
 
+    bool success = true;
+#ifdef Q_OS_WIN
+    const int currentPrintPage = qMax(1, workspaceActivePageNumber() + 1);
+    MengsheePrintDialog printDialog(&printer,
+                                    m_document->pages(),
+                                    currentPrintPage,
+                                    m_document->orientation(),
+                                    !m_document->bookmarkedPageRange().isEmpty(),
+                                    printConfigWidget,
+                                    widget());
+    connect(&printDialog, &MengsheePrintDialog::paintRequested, this, [this](QPrinter *previewPrinter) {
+        doPrint(*previewPrinter);
+    });
+
+    if (printDialog.exec() == QDialog::Accepted) {
+        success = doPrint(printer);
+    }
+#else
     QPrintDialog printDialog(&printer, widget());
     printDialog.setWindowTitle(i18nc("@title:window", "Print"));
     QList<QWidget *> options;
@@ -5138,7 +5164,6 @@ void Part::slotPrint()
         printDialog.setOption(QAbstractPrintDialog::PrintCurrentPage);
     }
 
-    bool success = true;
     if (printDialog.exec()) {
         // set option for margins if widget is of corresponding type that holds this information
         PrintOptionsWidget *optionWidget = dynamic_cast<PrintOptionsWidget *>(printConfigWidget);
@@ -5152,6 +5177,7 @@ void Part::slotPrint()
 
         success = doPrint(printer);
     }
+#endif
 
     if (m_cliPrintAndExit) {
         exit(success ? EXIT_SUCCESS : EXIT_FAILURE);

@@ -3,6 +3,8 @@ param(
     [string] $WslDistro = "openSUSE-Tumbleweed",
     [string] $QtPrefix = "",
     [string] $SdkPrefix = "",
+    [string] $StemTeXRoot = "",
+    [string] $StemTeXStageRoot = "",
     [string] $WindowsBuildRoot = "",
     [string] $WindowsVersion = "",
     [string] $WindowsFileVersion = "",
@@ -79,64 +81,97 @@ function Get-NewestFile([string] $Directory, [string] $Filter) {
         Select-Object -First 1
 }
 
+function Resolve-CMakeCommand {
+    $command = Get-Command "cmake.exe" -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    $candidate = "C:\Qt\Tools\CMake_64\bin\cmake.exe"
+    if (Test-Path -LiteralPath $candidate) {
+        return $candidate
+    }
+
+    throw "Cannot find cmake.exe. Install CMake or add it to PATH."
+}
+
 Write-Host "Mengshee local package build"
 Write-Host "  Repo:               $repoRoot"
 Write-Host "  Windows build root: $WindowsBuildRoot"
+Write-Host "  StemTeX source:     $StemTeXRoot"
+Write-Host "  StemTeX stage:      $StemTeXStageRoot"
 Write-Host "  Linux AppImage dir: $linuxAppImageDir"
 Write-Host "  Package output:     $PackageOutputRoot"
 Write-Host "  WSL distro:         $WslDistro"
 Write-Host "  AppImage version:   $AppImageVersion"
 
 if (!$SkipWindows) {
+    $cmake = Resolve-CMakeCommand
+    $windowsDriver = Join-Path $repoRoot "windows-build\cmake\build-windows.cmake"
+    $packageDriver = Join-Path $repoRoot "windows-build\cmake\package-windows.cmake"
+    $windowsPackageVersion = $WindowsVersion
+    if (!$windowsPackageVersion) {
+        $windowsPackageVersion = (Get-Content -LiteralPath (Join-Path $repoRoot "VERSION.txt") -Raw).Trim()
+    }
+    if ($windowsPackageVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$') {
+        throw "Windows version must contain four numeric components, got '$windowsPackageVersion'"
+    }
+    $windowsOutputDir = Join-Path $windowsDist "mengshee-$windowsPackageVersion"
+    $commonWindowsArgs = @(
+        "-DWORKSPACE_ROOT=$WindowsBuildRoot",
+        "-DJOBS=$WindowsJobs"
+    )
+    if ($QtPrefix) {
+        $commonWindowsArgs += "-DQT_PREFIX=$QtPrefix"
+    }
+    if ($SdkPrefix) {
+        $commonWindowsArgs += "-DSDK_PREFIX=$SdkPrefix"
+    }
+    if ($StemTeXRoot) {
+        $commonWindowsArgs += "-DSTEMTEX_ROOT=$([System.IO.Path]::GetFullPath($StemTeXRoot))"
+    }
+    if ($StemTeXStageRoot) {
+        $commonWindowsArgs += "-DSTEMTEX_STAGE_ROOT=$([System.IO.Path]::GetFullPath($StemTeXStageRoot))"
+    }
+
     if (!$SkipWindowsBuild) {
-        Invoke-Step "Windows standalone build" {
+        Invoke-Step "Windows canonical build" {
+            $args = @($commonWindowsArgs)
+            if ($SkipWindowsPackage) {
+                $args += "-DSKIP_PACKAGE=ON"
+            } else {
+                if ($WindowsVersion) {
+                    $args += "-DVERSION=$WindowsVersion"
+                }
+                if ($WindowsFileVersion) {
+                    $args += "-DFILE_VERSION=$WindowsFileVersion"
+                }
+            }
+            $args += @("-P", $windowsDriver)
+            Invoke-External $cmake $args
+        }
+    } elseif (!$SkipWindowsPackage) {
+        Invoke-Step "Windows package from deployed runtime" {
             $args = @(
-                "-ExecutionPolicy", "Bypass",
-                "-NoProfile",
-                "-File", (Join-Path $repoRoot "windows-build\scripts\build-mengshee-standalone.ps1"),
-                "-WorkspaceRoot", $WindowsBuildRoot,
-                "-Jobs", $WindowsJobs
+                "-DWORKSPACE_ROOT=$WindowsBuildRoot"
             )
-            if ($QtPrefix) {
-                $args += @("-QtPrefix", $QtPrefix)
+            if ($WindowsVersion) {
+                $args += "-DVERSION=$WindowsVersion"
             }
-            if ($SdkPrefix) {
-                $args += @("-SdkPrefix", $SdkPrefix)
+            if ($WindowsFileVersion) {
+                $args += "-DFILE_VERSION=$WindowsFileVersion"
             }
-            Invoke-External "powershell.exe" $args
+            $args += @("-P", $packageDriver)
+            Invoke-External $cmake $args
         }
     }
 
     if (!$SkipWindowsPackage) {
-        Invoke-Step "Windows installer" {
-            $args = @(
-                "-ExecutionPolicy", "Bypass",
-                "-NoProfile",
-                "-File", (Join-Path $repoRoot "windows-build\scripts\build-mengshee-installer.ps1"),
-                "-WorkspaceRoot", $WindowsBuildRoot,
-                "-Jobs", $WindowsJobs,
-                "-SkipBuild"
-            )
-            if ($QtPrefix) {
-                $args += @("-QtPrefix", $QtPrefix)
-            }
-            if ($SdkPrefix) {
-                $args += @("-SdkPrefix", $SdkPrefix)
-            }
-            if ($WindowsVersion) {
-                $args += @("-Version", $WindowsVersion)
-            }
-            if ($WindowsFileVersion) {
-                $args += @("-FileVersion", $WindowsFileVersion)
-            }
-            Invoke-External "powershell.exe" $args
-
-            $installer = Get-NewestFile $windowsDist "Mengshee-*-Setup.exe"
-            if (!$installer) {
-                throw "Windows installer was not found under $windowsDist"
-            }
-            $results["Windows installer"] = $installer.FullName
+        $installerPath = Join-Path $windowsOutputDir "Mengshee-$windowsPackageVersion-Setup.exe"
+        if (!(Test-Path -LiteralPath $installerPath -PathType Leaf)) {
+            throw "Windows installer was not found at $installerPath"
         }
+        $results["Windows installer"] = [System.IO.Path]::GetFullPath($installerPath)
     }
 }
 

@@ -16,13 +16,13 @@
 #if SourceDir == ""
 #define SourceDir "..\..\..\dist\mengshee-pdf\app"
 #endif
+#define StemTeXSupportDir GetEnv("MENGSHEE_STEMTEX_SUPPORT_STAGE")
+#if StemTeXSupportDir == ""
+#define StemTeXSupportDir "..\..\..\dist\mengshee-pdf\optional\stemtex-support"
+#endif
 #define OutputDir GetEnv("MENGSHEE_OUTPUT")
 #if OutputDir == ""
 #define OutputDir "..\..\..\dist"
-#endif
-#define StemTeXSupportUrl GetEnv("MENGSHEE_STEMTEX_SUPPORT_URL")
-#if StemTeXSupportUrl == ""
-#define StemTeXSupportUrl "https://github.com/zhaiyusci/mengshee/releases/download/v" + AppVersion + "/Mengshee-" + AppVersion + "-StemTeX-Support.exe"
 #endif
 
 [Setup]
@@ -53,13 +53,25 @@ ChangesAssociations=yes
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[Types]
+Name: "full"; Description: "Recommended (with bundled StemTeX TeX tree)"
+Name: "compact"; Description: "Compact (use an external TeX tree)"
+Name: "custom"; Description: "Custom installation"; Flags: iscustom
+
+[Components]
+Name: "core"; Description: "Mengshee application"; Types: full compact custom; Flags: fixed
+Name: "stemtexsupport"; Description: "Bundled StemTeX TeX tree"; Types: full
+
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "associatepdf"; Description: "Associate .pdf files with Mengshee"; GroupDescription: "File associations:"
-Name: "stemtexsupport"; Description: "Install bundled StemTeX TeX tree support package"; GroupDescription: "Optional downloads:"; Flags: unchecked
 
 [Files]
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Components: core; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#StemTeXSupportDir}\*"; DestDir: "{app}"; Components: stemtexsupport; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\StemTeX\runtime\texmf-dist"
 
 [Icons]
 Name: "{group}\Mengshee"; Filename: "{app}\bin\mengshee.exe"; IconFilename: "{app}\bin\mengshee.ico"
@@ -73,7 +85,6 @@ Root: HKCR; Subkey: "Mengshee.Document\shell\open\command"; ValueType: string; V
 
 [Run]
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Microsoft Visual C++ Runtime..."; Flags: waituntilterminated runhidden; Check: NeedsMsvcRuntime
-Filename: "{tmp}\Mengshee-StemTeX-Support.exe"; Parameters: "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=""{app}"""; StatusMsg: "Installing StemTeX support package..."; Flags: waituntilterminated runhidden; Check: ShouldInstallStemTeXSupport
 Filename: "{app}\bin\mengshee.exe"; Description: "Launch Mengshee"; Flags: nowait postinstall skipifsilent
 
 [Code]
@@ -87,11 +98,6 @@ begin
   Result := not (RegQueryDWordValue(HKLM64, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Installed', Installed) and (Installed = 1));
 end;
 
-function ShouldInstallStemTeXSupport: Boolean;
-begin
-  Result := WizardIsTaskSelected('stemtexsupport');
-end;
-
 procedure InitializeWizard;
 begin
   DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), nil);
@@ -103,19 +109,16 @@ var
   Error: String;
 begin
   Result := True;
-  if (CurPageID = wpReady) and (NeedsMsvcRuntime or ShouldInstallStemTeXSupport) then begin
+  if (CurPageID = wpReady) and NeedsMsvcRuntime then begin
     DownloadPage.Clear;
-    if NeedsMsvcRuntime then
-      DownloadPage.Add('https://aka.ms/vs/17/release/vc_redist.x64.exe', 'vc_redist.x64.exe', '');
-    if ShouldInstallStemTeXSupport then
-      DownloadPage.Add('{#StemTeXSupportUrl}', 'Mengshee-StemTeX-Support.exe', '');
+    DownloadPage.Add('https://aka.ms/vs/17/release/vc_redist.x64.exe', 'vc_redist.x64.exe', '');
     DownloadPage.Show;
     try
       try
         DownloadPage.Download;
       except
         if DownloadPage.AbortedByUser then
-          Log('MSVC runtime download was aborted by user.')
+          Log('Microsoft Visual C++ Runtime download was aborted by user.')
         else begin
           Error := Format('%s: %s', [DownloadPage.LastBaseNameOrUrl, GetExceptionMessage]);
           SuppressibleMsgBox(AddPeriod(Error), mbCriticalError, MB_OK, IDOK);

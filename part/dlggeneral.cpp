@@ -227,45 +227,6 @@ DlgGeneral::DlgGeneral(QWidget *parent, Okular::EmbedMode embedMode)
     pageUpDownOverlap->setObjectName(QStringLiteral("kcfg_ScrollOverlap"));
     layout->addRow(i18nc("@label:spinbox Config dialog, general page", "Page Up/Down overlap:"), pageUpDownOverlap);
 
-    // BEGIN Preview options section
-    layout->addRow(new QLabel(this));
-    QLabel *previewOptionsLabel = new QLabel(i18nc("@title:group Config dialog, general page", "Preview options:"), this);
-    layout->addRow(previewOptionsLabel);
-
-    QComboBox *modifiedLinkClickAction = new QComboBox(this);
-    modifiedLinkClickAction->addItem(i18nc("@item:inlistbox Config dialog, general page", "Show floating preview"));
-    modifiedLinkClickAction->addItem(i18nc("@item:inlistbox Config dialog, general page", "Open in auxiliary frame"));
-    modifiedLinkClickAction->setToolTip(i18nc("@info:tooltip Config dialog, general page", "Defines what happens when an internal link is middle-clicked or Ctrl+left-clicked."));
-    modifiedLinkClickAction->setObjectName(QStringLiteral("kcfg_ModifiedLinkClickAction"));
-    layout->addRow(i18nc("@label:listbox Config dialog, general page", "Middle-click or Ctrl+click on an internal link:"), modifiedLinkClickAction);
-
-    QSpinBox *linkPreviewDefaultWidth = new QSpinBox(this);
-    linkPreviewDefaultWidth->setMinimum(20);
-    linkPreviewDefaultWidth->setMaximum(100);
-    linkPreviewDefaultWidth->setSingleStep(5);
-    KLocalization::setupSpinBoxFormatString(linkPreviewDefaultWidth, ki18nc("@item:spinbox Config dialog, general page, link preview width", "%v%"));
-    linkPreviewDefaultWidth->setToolTip(i18nc("@info:tooltip Config dialog, general page", "Defines the initial width of the link preview pane as a percentage of the reading area."));
-    linkPreviewDefaultWidth->setObjectName(QStringLiteral("kcfg_LinkPreviewDefaultWidthPercent"));
-    layout->addRow(i18nc("@label:spinbox Config dialog, general page", "Default width:"), linkPreviewDefaultWidth);
-
-    QSpinBox *linkPreviewDefaultHeight = new QSpinBox(this);
-    linkPreviewDefaultHeight->setMinimum(20);
-    linkPreviewDefaultHeight->setMaximum(100);
-    linkPreviewDefaultHeight->setSingleStep(5);
-    KLocalization::setupSpinBoxFormatString(linkPreviewDefaultHeight, ki18nc("@item:spinbox Config dialog, general page, link preview height", "%v%"));
-    linkPreviewDefaultHeight->setToolTip(i18nc("@info:tooltip Config dialog, general page", "Defines the initial height of the link preview pane as a percentage of the reading area."));
-    linkPreviewDefaultHeight->setObjectName(QStringLiteral("kcfg_LinkPreviewDefaultHeightPercent"));
-    layout->addRow(i18nc("@label:spinbox Config dialog, general page", "Default height:"), linkPreviewDefaultHeight);
-
-    const auto updateLinkPreviewSizeOptions = [modifiedLinkClickAction, linkPreviewDefaultWidth, linkPreviewDefaultHeight]() {
-        const bool showFloatingPreview = modifiedLinkClickAction->currentIndex() == 0;
-        linkPreviewDefaultWidth->setEnabled(showFloatingPreview);
-        linkPreviewDefaultHeight->setEnabled(showFloatingPreview);
-    };
-    connect(modifiedLinkClickAction, &QComboBox::currentIndexChanged, this, updateLinkPreviewSizeOptions);
-    updateLinkPreviewSizeOptions();
-    // END Preview options section
-
     layout->addRow(new QLabel(this));
 
     // Combobox: prefer file name or full path in titlebar

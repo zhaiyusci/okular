@@ -61,6 +61,9 @@ function(mengshee_find_qscintilla_root out_var)
     if(DEFINED ENV{MENGSHEE_STEMTEX_SOURCE_ROOT})
         list(APPEND _candidates "$ENV{MENGSHEE_STEMTEX_SOURCE_ROOT}/third_party")
     endif()
+    if(DEFINED STEMTEX_ROOT AND NOT "${STEMTEX_ROOT}" STREQUAL "")
+        list(APPEND _candidates "${STEMTEX_ROOT}/third_party")
+    endif()
     list(APPEND _candidates "${SOURCE_ROOT}/external/stemtex/third_party")
     get_filename_component(_documents_root "${SOURCE_ROOT}/../.." ABSOLUTE)
     list(APPEND _candidates "${_documents_root}/xetex/stemtex/third_party")
@@ -244,17 +247,23 @@ if(NOT DEFINED SKIP_BUILD OR NOT SKIP_BUILD)
 endif()
 
 if(NOT DEFINED SKIP_DEPLOY OR NOT SKIP_DEPLOY)
-    execute_process(
-        COMMAND "${CMAKE_PROGRAM}"
-            "-DSOURCE_ROOT=${SOURCE_ROOT}"
-            "-DWORKSPACE_ROOT=${WORKSPACE_ROOT}"
-            "-DSDK_PREFIX=${SDK_PREFIX}"
-            "-DINSTALL_PREFIX=${INSTALL_PREFIX}"
-            "-DQT_PREFIX=${QT_PREFIX}"
-            "-DQSCINTILLA_ROOT=${QSCINTILLA_ROOT_RESOLVED}"
-            -P "${_script_dir}/deploy-runtime.cmake"
-        RESULT_VARIABLE _deploy_result
+    set(_deploy_args
+        "${CMAKE_PROGRAM}"
+        "-DSOURCE_ROOT=${SOURCE_ROOT}"
+        "-DWORKSPACE_ROOT=${WORKSPACE_ROOT}"
+        "-DSDK_PREFIX=${SDK_PREFIX}"
+        "-DINSTALL_PREFIX=${INSTALL_PREFIX}"
+        "-DQT_PREFIX=${QT_PREFIX}"
+        "-DQSCINTILLA_ROOT=${QSCINTILLA_ROOT_RESOLVED}"
     )
+    if(DEFINED STEMTEX_ROOT AND NOT "${STEMTEX_ROOT}" STREQUAL "")
+        list(APPEND _deploy_args "-DSTEMTEX_ROOT=${STEMTEX_ROOT}")
+    endif()
+    if(DEFINED STEMTEX_STAGE_ROOT AND NOT "${STEMTEX_STAGE_ROOT}" STREQUAL "")
+        list(APPEND _deploy_args "-DSTEMTEX_STAGE_ROOT=${STEMTEX_STAGE_ROOT}")
+    endif()
+    list(APPEND _deploy_args -P "${_script_dir}/deploy-runtime.cmake")
+    execute_process(COMMAND ${_deploy_args} RESULT_VARIABLE _deploy_result)
     if(NOT _deploy_result EQUAL 0)
         message(FATAL_ERROR "Runtime deployment failed with exit code ${_deploy_result}")
     endif()
@@ -281,6 +290,12 @@ if(NOT DEFINED SKIP_PACKAGE OR NOT SKIP_PACKAGE)
     endif()
     if(DEFINED ISCC AND NOT "${ISCC}" STREQUAL "")
         list(APPEND _package_args "-DISCC=${ISCC}")
+    endif()
+    if(DEFINED VERSION AND NOT "${VERSION}" STREQUAL "")
+        list(APPEND _package_args "-DVERSION=${VERSION}")
+    endif()
+    if(DEFINED FILE_VERSION AND NOT "${FILE_VERSION}" STREQUAL "")
+        list(APPEND _package_args "-DFILE_VERSION=${FILE_VERSION}")
     endif()
     list(APPEND _package_args -P "${_script_dir}/package-windows.cmake")
     execute_process(COMMAND ${_package_args} RESULT_VARIABLE _package_result)

@@ -12,6 +12,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QLabel>
+#include <QPageRanges>
 #include <QPrintEngine>
 #include <QShowEvent>
 #include <QSize>
@@ -154,6 +155,17 @@ QList<int> FilePrinter::pageList(QPrinter &printer, int lastPage, int currentPag
     QList<int> list;
 
     if (printer.printRange() == QPrinter::PageRange) {
+        const QPageRanges pageRanges = printer.pageRanges();
+        if (!pageRanges.isEmpty()) {
+            for (const QPageRanges::Range &range : pageRanges.toRangeList()) {
+                const int firstPage = qMax(1, range.from);
+                const int finalPage = qMin(lastPage, range.to);
+                for (int page = firstPage; page <= finalPage; ++page) {
+                    list << page;
+                }
+            }
+            return list;
+        }
         startPage = printer.fromPage();
         endPage = printer.toPage();
     } else if (printer.printRange() == QPrinter::CurrentPage) {

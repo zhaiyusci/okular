@@ -10,7 +10,9 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 
+#include <algorithm>
 #include <exception>
+#include <cmath>
 #include <memory>
 #include <vector>
 
@@ -49,6 +51,7 @@
 #include <core/movie.h>
 #include <core/page.h>
 #include <core/pagetransition.h>
+#include <core/printoptionswidget.h>
 #include <core/signatureutils.h>
 #include <core/sound.h>
 #include <core/sourcereference.h>
@@ -91,6 +94,7 @@ public:
 
     PDFOptionsPage()
     {
+        setProperty(Okular::PrintLayout::supportsProperty, true);
         setWindowTitle(i18n("PDF Options"));
         QVBoxLayout *layout = new QVBoxLayout(this);
         m_printAnnots = new QCheckBox(i18n("Print annotations"), this);
@@ -101,6 +105,12 @@ public:
         m_forceRaster->setToolTip(i18n("Rasterize into an image before printing"));
         m_forceRaster->setWhatsThis(i18n("Forces the rasterization of each page into an image before printing it. This usually gives somewhat worse results, but is useful when printing documents that appear to print incorrectly."));
         layout->addWidget(m_forceRaster);
+#ifdef Q_OS_WIN
+        // The Windows backend always rasterizes PDF pages. Do not expose a
+        // control that cannot change the result.
+        m_forceRaster->setChecked(true);
+        m_forceRaster->hide();
+#endif
 
         QWidget *formWidget = new QWidget(this);
         QFormLayout *printBackendLayout = new QFormLayout(formWidget);
@@ -1827,51 +1837,309 @@ Okular::Document::PrintError PDFGenerator::print(QPrinter &printer)
     if (forceRasterize) { /* cppcheck-suppress knownConditionTrueFalse */
         pdfdoc->setRenderHint(Poppler::Document::HideAnnotations, !printAnnots);
         pdfdoc->setRenderHint(Poppler::Document::OverprintPreview, overprintPreviewEnabled);
+        const bool oldGraphicsAntialiasing = pdfdoc->renderHints().testFlag(Poppler::Document::Antialiasing);
+        const bool oldTextAntialiasing = pdfdoc->renderHints().testFlag(Poppler::Document::TextAntialiasing);
+        const bool oldTextHinting = pdfdoc->renderHints().testFlag(Poppler::Document::TextHinting);
+        const bool oldTextSlightHinting = pdfdoc->renderHints().testFlag(Poppler::Document::TextSlightHinting);
+        const bool oldThinLineShape = pdfdoc->renderHints().testFlag(Poppler::Document::ThinLineShape);
+        pdfdoc->setRenderHint(Poppler::Document::Antialiasing, true);
+        pdfdoc->setRenderHint(Poppler::Document::TextAntialiasing, true);
 
         if (pdfOptionsPage) {
             // If requested, scale to full page instead of the printable area
             printer.setFullPage(pdfOptionsPage->ignorePrintMargins());
         }
 
-        QPainter painter;
-        painter.begin(&printer);
-
         QList<int> pageList = Okular::FilePrinter::pageList(printer, pdfdoc->numPages(), document()->currentPage() + 1, document()->bookmarkedPageList());
-        for (int i = 0; i < pageList.count(); ++i) {
-            if (i != 0) {
-                printer.newPage();
+        for (int &page : pageList) {
+            --page;
+        }
+
+        const int layoutMode = pdfOptionsPage ? pdfOptionsPage->property(Okular::PrintLayout::modeProperty).toInt() : Okular::PrintLayout::Size;
+        const bool preview = pdfOptionsPage && pdfOptionsPage->property(Okular::PrintLayout::previewProperty).toBool();
+        const int previewSheet = pdfOptionsPage ? qMax(0, pdfOptionsPage->property(Okular::PrintLayout::previewSheetProperty).toInt()) : 0;
+        if (preview) {
+            // Hinting keeps small glyphs coherent after the final fit-to-view
+            // reduction, while thin-line shaping prevents graphs and annotation
+            // strokes from breaking into isolated pixels.
+            pdfdoc->setRenderHint(Poppler::Document::TextHinting, true);
+            pdfdoc->setRenderHint(Poppler::Document::TextSlightHinting, true);
+            pdfdoc->setRenderHint(Poppler::Document::ThinLineShape, true);
+        }
+
+        struct OutputSheet {
+            QList<int> pages;
+            int posterPage = -1;
+            int tileColumn = 0;
+            int tileRow = 0;
+            int tileColumns = 1;
+            int tileRows = 1;
+        };
+
+        QPainter printerPainter;
+        printerPainter.begin(&printer);
+        printerPainter.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
+        const QRectF sheetRect = printerPainter.window();
+        QList<OutputSheet> sheets;
+
+        if (layoutMode == Okular::PrintLayout::Multiple) {
+            const int pagesPerSheet = pdfOptionsPage ? qMax(1, pdfOptionsPage->property(Okular::PrintLayout::pagesPerSheetProperty).toInt()) : 2;
+            for (int first = 0; first < pageList.size(); first += pagesPerSheet) {
+                OutputSheet sheet;
+                sheet.pages = pageList.sliced(first, qMin(pagesPerSheet, pageList.size() - first));
+                sheets.append(sheet);
             }
-
-            const int page = pageList.at(i) - 1;
-            QMutexLocker locker(userMutex());
-            std::unique_ptr<Poppler::Page> pp(pdfdoc->page(nativePageForLogicalPage(page)));
-            if (pp) {
-                QSizeF pageSize = pp->pageSizeF();      // Unit is 'points' (i.e., 1/72th of an inch)
-                QRect painterWindow = painter.window(); // Unit is 'QPrinter::DevicePixel'
-
-                // Default: no scaling at all, but we need to go from DevicePixel units to 'points'
-                // Warning: We compute the horizontal scaling, and later assume that the vertical scaling will be the same.
-                double scaling = printer.paperRect(QPrinter::DevicePixel).width() / printer.paperRect(QPrinter::Point).width();
-
-                if (scaleMode != PDFOptionsPage::None) {
-                    // Get the two scaling factors needed to fit the page onto paper horizontally or vertically
-                    auto horizontalScaling = painterWindow.width() / pageSize.width();
-                    auto verticalScaling = painterWindow.height() / pageSize.height();
-
-                    // We use the smaller of the two for both directions, to keep the aspect ratio
-                    scaling = std::min(horizontalScaling, verticalScaling);
+        } else if (layoutMode == Okular::PrintLayout::Booklet) {
+            QList<int> bookletPages = pageList;
+            while (bookletPages.size() % 4 != 0) {
+                bookletPages.append(-1);
+            }
+            const int subset = pdfOptionsPage ? pdfOptionsPage->property(Okular::PrintLayout::bookletSubsetProperty).toInt() : Okular::PrintLayout::BothSides;
+            const bool bindRight = pdfOptionsPage && pdfOptionsPage->property(Okular::PrintLayout::bookletBindingProperty).toInt() == Okular::PrintLayout::BindRight;
+            for (int physicalSheet = 0; physicalSheet < bookletPages.size() / 4; ++physicalSheet) {
+                OutputSheet front;
+                front.pages = {bookletPages.at(bookletPages.size() - 1 - 2 * physicalSheet), bookletPages.at(2 * physicalSheet)};
+                OutputSheet back;
+                back.pages = {bookletPages.at(2 * physicalSheet + 1), bookletPages.at(bookletPages.size() - 2 - 2 * physicalSheet)};
+                if (bindRight) {
+                    std::reverse(front.pages.begin(), front.pages.end());
+                    std::reverse(back.pages.begin(), back.pages.end());
                 }
-
-#ifdef Q_OS_WIN
-                QImage img = pp->renderToImage(printer.physicalDpiX(), printer.physicalDpiY());
-#else
-                // UNIX: Same resolution as the postscript rasterizer; see discussion at https://git.reviewboard.kde.org/r/130218/
-                QImage img = pp->renderToImage(300, 300);
-#endif
-                painter.drawImage(QRectF(QPointF(0, 0), scaling * pp->pageSizeF()), img);
+                if (subset != Okular::PrintLayout::BackSides) {
+                    sheets.append(front);
+                }
+                if (subset != Okular::PrintLayout::FrontSides) {
+                    sheets.append(back);
+                }
+            }
+        } else if (layoutMode == Okular::PrintLayout::Poster) {
+            const qreal posterScale = pdfOptionsPage ? qMax(0.1, pdfOptionsPage->property(Okular::PrintLayout::posterScaleProperty).toDouble() / 100.0) : 1.0;
+            const qreal overlapMillimeters = pdfOptionsPage ? qMax(0.0, pdfOptionsPage->property(Okular::PrintLayout::posterOverlapProperty).toDouble()) : 0.0;
+            const qreal overlapPixels = overlapMillimeters * printer.resolution() / 25.4;
+            const qreal stepWidth = qMax(1.0, sheetRect.width() - overlapPixels);
+            const qreal stepHeight = qMax(1.0, sheetRect.height() - overlapPixels);
+            for (const int page : std::as_const(pageList)) {
+                QSizeF pageSize;
+                {
+                    QMutexLocker locker(userMutex());
+                    const std::unique_ptr<Poppler::Page> pp(pdfdoc->page(nativePageForLogicalPage(page)));
+                    if (pp) {
+                        pageSize = pp->pageSizeF();
+                    }
+                }
+                if (!pageSize.isValid()) {
+                    continue;
+                }
+                const qreal posterWidth = pageSize.width() * printer.resolution() / 72.0 * posterScale;
+                const qreal posterHeight = pageSize.height() * printer.resolution() / 72.0 * posterScale;
+                const int columns = qMax(1, static_cast<int>(std::ceil(qMax(0.0, posterWidth - overlapPixels) / stepWidth)));
+                const int rows = qMax(1, static_cast<int>(std::ceil(qMax(0.0, posterHeight - overlapPixels) / stepHeight)));
+                for (int row = 0; row < rows; ++row) {
+                    for (int column = 0; column < columns; ++column) {
+                        OutputSheet sheet;
+                        sheet.posterPage = page;
+                        sheet.tileColumn = column;
+                        sheet.tileRow = row;
+                        sheet.tileColumns = columns;
+                        sheet.tileRows = rows;
+                        sheets.append(sheet);
+                    }
+                }
+            }
+        } else {
+            for (const int page : std::as_const(pageList)) {
+                OutputSheet sheet;
+                sheet.pages = {page};
+                sheets.append(sheet);
             }
         }
-        painter.end();
+
+        if (pdfOptionsPage) {
+            pdfOptionsPage->setProperty(Okular::PrintLayout::previewSheetCountProperty, qMax(1, sheets.size()));
+        }
+        if (preview && !sheets.isEmpty()) {
+            sheets = {sheets.at(qBound(0, previewSheet, sheets.size() - 1))};
+        }
+
+        const auto renderPage = [this, &printer](int page, int dpi, QSizeF *pageSize) {
+            QImage image;
+            if (page < 0) {
+                return image;
+            }
+            QMutexLocker locker(userMutex());
+            const std::unique_ptr<Poppler::Page> pp(pdfdoc->page(nativePageForLogicalPage(page)));
+            if (!pp) {
+                return image;
+            }
+            if (pageSize) {
+                *pageSize = pp->pageSizeF();
+            }
+            image = pp->renderToImage(dpi, dpi);
+            if (printer.colorMode() == QPrinter::GrayScale && !image.isGrayscale()) {
+                image = image.convertToFormat(QImage::Format_Grayscale8);
+            }
+            return image;
+        };
+
+        const auto fittedPageRect = [&printer, scaleMode](const QSizeF &pageSize, const QRectF &bounds, bool singlePageMode) {
+            qreal scaling = printer.resolution() / 72.0;
+            if (!singlePageMode || scaleMode != PDFOptionsPage::None) {
+                scaling = qMin(bounds.width() / pageSize.width(), bounds.height() / pageSize.height());
+            }
+            const QSizeF targetSize = pageSize * scaling;
+            return QRectF(bounds.center().x() - targetSize.width() / 2.0, bounds.center().y() - targetSize.height() / 2.0, targetSize.width(), targetSize.height());
+        };
+
+        const int pagesPerSheet = pdfOptionsPage ? qMax(1, pdfOptionsPage->property(Okular::PrintLayout::pagesPerSheetProperty).toInt()) : 2;
+        const int pageOrder = pdfOptionsPage ? pdfOptionsPage->property(Okular::PrintLayout::pageOrderProperty).toInt() : Okular::PrintLayout::Horizontal;
+        const bool drawPageBorder = pdfOptionsPage && pdfOptionsPage->property(Okular::PrintLayout::pageBorderProperty).toBool();
+        const qreal posterScale = pdfOptionsPage ? qMax(0.1, pdfOptionsPage->property(Okular::PrintLayout::posterScaleProperty).toDouble() / 100.0) : 1.0;
+        const qreal posterOverlapPixels = pdfOptionsPage ? qMax(0.0, pdfOptionsPage->property(Okular::PrintLayout::posterOverlapProperty).toDouble()) * printer.resolution() / 25.4 : 0.0;
+        const bool posterCutMarks = pdfOptionsPage && pdfOptionsPage->property(Okular::PrintLayout::posterCutMarksProperty).toBool();
+
+        const auto drawSheet = [&](QPainter &painter, const OutputSheet &sheet, int renderDpi) {
+            painter.save();
+            painter.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
+            painter.fillRect(sheetRect, Qt::white);
+
+            if (layoutMode == Okular::PrintLayout::Poster) {
+                QSizeF pageSize;
+                const QImage image = renderPage(sheet.posterPage, renderDpi, &pageSize);
+                if (!image.isNull()) {
+                    const QSizeF posterSize(pageSize.width() * printer.resolution() / 72.0 * posterScale, pageSize.height() * printer.resolution() / 72.0 * posterScale);
+                    const qreal stepWidth = qMax(1.0, sheetRect.width() - posterOverlapPixels);
+                    const qreal stepHeight = qMax(1.0, sheetRect.height() - posterOverlapPixels);
+                    const QRectF target(sheetRect.left() - sheet.tileColumn * stepWidth, sheetRect.top() - sheet.tileRow * stepHeight, posterSize.width(), posterSize.height());
+                    painter.setClipRect(sheetRect);
+                    painter.drawImage(target, image);
+                    painter.setClipping(false);
+                    if (posterCutMarks) {
+                        const qreal mark = 3.0 * printer.resolution() / 25.4;
+                        painter.setPen(QPen(Qt::black, 0));
+                        painter.drawLine(sheetRect.topLeft(), sheetRect.topLeft() + QPointF(mark, 0));
+                        painter.drawLine(sheetRect.topLeft(), sheetRect.topLeft() + QPointF(0, mark));
+                        painter.drawLine(sheetRect.topRight(), sheetRect.topRight() - QPointF(mark, 0));
+                        painter.drawLine(sheetRect.topRight(), sheetRect.topRight() + QPointF(0, mark));
+                        painter.drawLine(sheetRect.bottomLeft(), sheetRect.bottomLeft() + QPointF(mark, 0));
+                        painter.drawLine(sheetRect.bottomLeft(), sheetRect.bottomLeft() - QPointF(0, mark));
+                        painter.drawLine(sheetRect.bottomRight(), sheetRect.bottomRight() - QPointF(mark, 0));
+                        painter.drawLine(sheetRect.bottomRight(), sheetRect.bottomRight() - QPointF(0, mark));
+                    }
+                }
+                painter.restore();
+                return;
+            }
+
+            int columns = 1;
+            int rows = 1;
+            if (layoutMode == Okular::PrintLayout::Booklet) {
+                columns = 2;
+            } else if (layoutMode == Okular::PrintLayout::Multiple) {
+                if (pagesPerSheet == 2) {
+                    columns = 2;
+                    rows = 1;
+                } else if (pagesPerSheet == 4) {
+                    columns = 2;
+                    rows = 2;
+                } else if (pagesPerSheet == 6) {
+                    columns = 3;
+                    rows = 2;
+                } else if (pagesPerSheet == 9) {
+                    columns = 3;
+                    rows = 3;
+                } else {
+                    columns = 4;
+                    rows = 4;
+                }
+                if (printer.pageLayout().orientation() == QPageLayout::Portrait && columns > rows) {
+                    std::swap(columns, rows);
+                }
+            }
+
+            for (int index = 0; index < sheet.pages.size(); ++index) {
+                const int page = sheet.pages.at(index);
+                int column = index % columns;
+                int row = index / columns;
+                if (layoutMode == Okular::PrintLayout::Multiple) {
+                    if (pageOrder == Okular::PrintLayout::HorizontalReversed) {
+                        column = columns - 1 - column;
+                    } else if (pageOrder == Okular::PrintLayout::Vertical || pageOrder == Okular::PrintLayout::VerticalReversed) {
+                        column = index / rows;
+                        row = index % rows;
+                        if (pageOrder == Okular::PrintLayout::VerticalReversed) {
+                            row = rows - 1 - row;
+                        }
+                    }
+                }
+                const QRectF cell(sheetRect.left() + column * sheetRect.width() / columns,
+                                  sheetRect.top() + row * sheetRect.height() / rows,
+                                  sheetRect.width() / columns,
+                                  sheetRect.height() / rows);
+                if (page < 0) {
+                    continue;
+                }
+                QSizeF pageSize;
+                const QImage image = renderPage(page, renderDpi, &pageSize);
+                if (image.isNull() || !pageSize.isValid()) {
+                    continue;
+                }
+                const qreal inset = qMin(cell.width(), cell.height()) * 0.015;
+                const QRectF target = fittedPageRect(pageSize, cell.adjusted(inset, inset, -inset, -inset), layoutMode == Okular::PrintLayout::Size);
+                painter.drawImage(target, image);
+                if (drawPageBorder && layoutMode == Okular::PrintLayout::Multiple) {
+                    painter.setPen(QPen(Qt::black, 0));
+                    painter.setBrush(Qt::NoBrush);
+                    painter.drawRect(target);
+                }
+            }
+            painter.restore();
+        };
+
+        for (int sheetIndex = 0; sheetIndex < sheets.size(); ++sheetIndex) {
+            if (sheetIndex != 0) {
+                printer.newPage();
+            }
+            if (preview) {
+                const QSize requestedViewport = pdfOptionsPage ? pdfOptionsPage->property(Okular::PrintLayout::previewViewportProperty).toSize() : QSize();
+                QSize displaySize = sheetRect.size().toSize();
+                if (requestedViewport.isValid()) {
+                    displaySize.scale(requestedViewport, Qt::KeepAspectRatio);
+                }
+
+                // Keep a 2x screen-resolution image in the preview picture, and
+                // produce it from a further 2x supersampled intermediate.  This
+                // gives the final view a small, predictable reduction instead of
+                // making it sample directly from a many-thousand-pixel print page.
+                constexpr int retainedScreenScale = 2;
+                constexpr int supersampling = 2;
+                const QSize previewRasterSize = displaySize * retainedScreenScale;
+                QImage supersampled(previewRasterSize * supersampling, QImage::Format_ARGB32_Premultiplied);
+                supersampled.fill(Qt::white);
+                QPainter imagePainter(&supersampled);
+                const qreal horizontalScale = static_cast<qreal>(supersampled.width()) / sheetRect.width();
+                const qreal verticalScale = static_cast<qreal>(supersampled.height()) / sheetRect.height();
+                imagePainter.scale(horizontalScale, verticalScale);
+                imagePainter.translate(-sheetRect.topLeft());
+                const int previewDpi = qMax(72, static_cast<int>(std::ceil(printer.resolution() * qMax(horizontalScale, verticalScale))));
+                drawSheet(imagePainter, sheets.at(sheetIndex), previewDpi);
+                imagePainter.end();
+                const QImage downsampled = supersampled.scaled(previewRasterSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+                // QPrintPreviewWidget records the print job in logical printer
+                // coordinates.  Drawing the image at its native pixel size makes
+                // a high-DPI preview larger than the logical paint rect, so only
+                // its top-left portion is visible.  Map the supersampled result
+                // back onto the complete printable rect explicitly.
+                printerPainter.drawImage(sheetRect, downsampled);
+            } else {
+                drawSheet(printerPainter, sheets.at(sheetIndex), printer.resolution());
+            }
+        }
+        printerPainter.end();
+        pdfdoc->setRenderHint(Poppler::Document::Antialiasing, oldGraphicsAntialiasing);
+        pdfdoc->setRenderHint(Poppler::Document::TextAntialiasing, oldTextAntialiasing);
+        pdfdoc->setRenderHint(Poppler::Document::TextHinting, oldTextHinting);
+        pdfdoc->setRenderHint(Poppler::Document::TextSlightHinting, oldTextSlightHinting);
+        pdfdoc->setRenderHint(Poppler::Document::ThinLineShape, oldThinLineShape);
         return Okular::Document::NoPrintError;
     }
 

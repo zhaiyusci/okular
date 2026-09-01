@@ -270,10 +270,7 @@ private:
     void textSelectionClear();
     // updates cursor
     void updateCursor(const QPoint p);
-    void updateLinkPreview(const Okular::ObjectRect *rect, const QPoint &contentPos);
-    void handleModifiedLinkClick(const Okular::ObjectRect *rect, const QPoint &contentPos);
-    void hideLinkPreview();
-    void showLinkPreview();
+    void requestInternalLinkInAuxiliaryFrame(const Okular::ObjectRect *rect, const QPoint &contentPos);
     void setDocumentViewport(const Okular::DocumentViewport &viewport, Okular::DocumentObserver *excludeObserver = nullptr, bool smoothMove = false, bool updateHistory = true);
     void setDocumentViewportPage(int page, Okular::DocumentObserver *excludeObserver = nullptr, bool smoothMove = false);
 
