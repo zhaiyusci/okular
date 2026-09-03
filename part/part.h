@@ -353,6 +353,8 @@ private:
     void refreshTemplateNotes();
     PageView *workspaceActivePageView() const;
     int workspaceActivePageNumber() const;
+    void connectWorkspacePageView(PageView *view);
+    void openAuxiliaryView(PageView *sourceView, const Okular::DocumentViewport &target, const QString &title);
     void registerWorkspacePageViewActions(PageView *view);
     void routeWorkspacePageViewActions(PageView *view);
     void updateWorkspacePageViews();
@@ -464,6 +466,7 @@ private:
     QAction *m_renameBookmark;
     QAction *m_prevBookmark;
     QAction *m_nextBookmark;
+    QAction *m_openAuxiliaryView;
     QAction *m_copy;
     QAction *m_copyWithoutLineBreaks;
     QAction *m_pasteAnnotation;

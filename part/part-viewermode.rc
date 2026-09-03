@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
-<gui name="okular_part_viewermode" version="7">
+<gui name="okular_part_viewermode" version="9">
 
 <MenuBar>
   <Menu name="file"><text>&amp;File</text>
@@ -19,6 +19,8 @@
 </MenuBar>
 
 <Menu name="menu_okular_part_viewer">
+  <Action name="open_auxiliary_view" group="viewer_menu_merge"/>
+  <Separator group="viewer_menu_merge"/>
   <Action name="mouse_drag" group="viewer_menu_merge"/>
   <Action name="mouse_zoom" group="viewer_menu_merge"/>
   <Separator group="viewer_menu_merge"/>
@@ -69,6 +71,8 @@
   <Action name="mouse_drag"/>
   <Action name="mouse_zoom"/>
   <Action name="mouse_selecttools"/>
+  <Spacer/>
+  <Action name="open_auxiliary_view"/>
 </ToolBar>
 
 </gui>

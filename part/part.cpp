@@ -625,55 +625,7 @@ Part::Part(QObject *parent, const QVariantList &args)
         }
     });
 
-    auto connectWorkspacePageView = [this](PageView *view) {
-        connect(view, &PageView::rightClick, this, &Part::slotShowMenu);
-        connect(view, &PageView::triggerSearch, this, [this, view](const QString &searchText) {
-            m_findBar->setSearchView(view);
-            m_findBar->startSearch(searchText);
-            slotShowFindBar();
-        });
-        connect(view, &PageView::fitWindowToPage, this, &Part::fitWindowToPage);
-        connect(view, &PageView::requestOpenNewlySignedFile, this, &Part::requestOpenNewlySignedFile);
-        connect(view, &PageView::escPressed, m_findBar, &FindBar::resetSearch);
-        connect(view, &PageView::mouseBackButtonClick, this, &Part::slotHistoryBack);
-        connect(view, &PageView::mouseForwardButtonClick, this, &Part::slotHistoryNext);
-        connect(view, &PageView::viewportStateChanged, this, [this, view] {
-            if (workspaceActivePageView() == view) {
-                updateViewActions();
-            }
-        });
-#if HAVE_NEW_SIGNATURE_API
-        connect(view, &PageView::signingStarted, this, [this, view] {
-            if (m_signingPageView && m_signingPageView != view && m_signingPageView->hasPendingSignature()) {
-                m_signingPageView->cancelSigning();
-            }
-            m_signingPageView = view;
-            m_signatureInProgressMessage->setVisible(true);
-        });
-#endif
-    };
-
-    connect(m_documentWorkspace, &DocumentWorkspace::auxiliaryFrameRequested, this, [this, connectWorkspacePageView](PageView *sourceView, const DocumentViewport &target, const QString &title) {
-        auto *view = new PageView(nullptr, m_document, true);
-        auto *viewActions = new KActionCollection(view);
-        viewActions->setObjectName(QStringLiteral("auxiliaryPageViewActions"));
-        view->setupBaseActions(viewActions);
-        view->setupViewerActions(viewActions);
-        if (m_embedMode != ViewerWidgetMode && m_embedMode != PrintPreviewMode) {
-            view->setupActions(viewActions, m_pageView->annotator());
-        }
-        registerWorkspacePageViewActions(view);
-        connectWorkspacePageView(view);
-        // Seed the new tab from the frame where the link was clicked. This
-        // makes Back return to the link source instead of an unrelated main
-        // frame position when auxiliary tabs spawn further tabs.
-        view->initializeIndependentNavigation(sourceView ? sourceView->documentViewport() : DocumentViewport(), target);
-        m_document->addObserver(view);
-        m_document->registerView(view);
-        m_documentWorkspace->addAuxiliaryView(view, title, sourceView);
-        updateWorkspacePageViews();
-        view->setFocus();
-    });
+    connect(m_documentWorkspace, &DocumentWorkspace::auxiliaryFrameRequested, this, &Part::openAuxiliaryView);
 
     connect(m_documentWorkspace, &DocumentWorkspace::mainViewChanged, this, [this](PageView *oldMainView, PageView *newMainView) {
         if (!oldMainView || !newMainView) {
@@ -845,6 +797,21 @@ void Part::setupViewerActions()
 {
     // ACTIONS
     KActionCollection *ac = actionCollection();
+
+    m_openAuxiliaryView = ac->addAction(QStringLiteral("open_auxiliary_view"));
+    m_openAuxiliaryView->setText(i18n("Open Current View in Auxiliary Frame"));
+    m_openAuxiliaryView->setIconText(i18nc("@action:button", "Auxiliary"));
+    m_openAuxiliaryView->setIcon(QIcon::fromTheme(QStringLiteral("view-right-new")));
+    m_openAuxiliaryView->setPriority(QAction::LowPriority);
+    m_openAuxiliaryView->setEnabled(false);
+    connect(m_openAuxiliaryView, &QAction::triggered, this, [this] {
+        PageView *sourceView = workspaceActivePageView();
+        if (!sourceView || m_document->pages() == 0) {
+            return;
+        }
+        const DocumentViewport target = sourceView->documentViewport();
+        openAuxiliaryView(sourceView, target, i18nc("@title Auxiliary document frame", "Page %1", target.pageNumber + 1));
+    });
 
     // Page Traversal actions
     m_gotoPage = KStandardAction::gotoPage(this, SLOT(slotGoToPage()), ac);
@@ -1242,6 +1209,61 @@ PageView *Part::workspaceActivePageView() const
         }
     }
     return m_pageView;
+}
+
+void Part::connectWorkspacePageView(PageView *view)
+{
+    connect(view, &PageView::rightClick, this, &Part::slotShowMenu);
+    connect(view, &PageView::triggerSearch, this, [this, view](const QString &searchText) {
+        m_findBar->setSearchView(view);
+        m_findBar->startSearch(searchText);
+        slotShowFindBar();
+    });
+    connect(view, &PageView::fitWindowToPage, this, &Part::fitWindowToPage);
+    connect(view, &PageView::requestOpenNewlySignedFile, this, &Part::requestOpenNewlySignedFile);
+    connect(view, &PageView::escPressed, m_findBar, &FindBar::resetSearch);
+    connect(view, &PageView::mouseBackButtonClick, this, &Part::slotHistoryBack);
+    connect(view, &PageView::mouseForwardButtonClick, this, &Part::slotHistoryNext);
+    connect(view, &PageView::viewportStateChanged, this, [this, view] {
+        if (workspaceActivePageView() == view) {
+            updateViewActions();
+        }
+    });
+#if HAVE_NEW_SIGNATURE_API
+    connect(view, &PageView::signingStarted, this, [this, view] {
+        if (m_signingPageView && m_signingPageView != view && m_signingPageView->hasPendingSignature()) {
+            m_signingPageView->cancelSigning();
+        }
+        m_signingPageView = view;
+        m_signatureInProgressMessage->setVisible(true);
+    });
+#endif
+}
+
+void Part::openAuxiliaryView(PageView *sourceView, const DocumentViewport &target, const QString &title)
+{
+    if (!m_documentWorkspace || !target.isValid()) {
+        return;
+    }
+
+    auto *view = new PageView(nullptr, m_document, true);
+    auto *viewActions = new KActionCollection(view);
+    viewActions->setObjectName(QStringLiteral("auxiliaryPageViewActions"));
+    view->setupBaseActions(viewActions);
+    view->setupViewerActions(viewActions);
+    if (m_embedMode != ViewerWidgetMode && m_embedMode != PrintPreviewMode) {
+        view->setupActions(viewActions, m_pageView->annotator());
+    }
+    registerWorkspacePageViewActions(view);
+    connectWorkspacePageView(view);
+    // Seed the new tab from the source frame. For links this makes Back return
+    // to the clicked link; direct opens simply start at the current viewport.
+    view->initializeIndependentNavigation(sourceView ? sourceView->documentViewport() : DocumentViewport(), target);
+    m_document->addObserver(view);
+    m_document->registerView(view);
+    m_documentWorkspace->addAuxiliaryView(view, title, sourceView);
+    updateWorkspacePageViews();
+    view->setFocus();
 }
 
 void Part::updateWorkspacePageViews()
@@ -2677,6 +2699,7 @@ void Part::updateViewActions()
 {
     bool opened = m_document->pages() > 0;
     PageView *activeView = workspaceActivePageView();
+    m_openAuxiliaryView->setEnabled(opened && activeView);
     const int currentPage = activeView ? activeView->documentViewport().pageNumber : static_cast<int>(m_document->currentPage());
     if (opened) {
         m_gotoPage->setEnabled(m_document->pages() > 1);

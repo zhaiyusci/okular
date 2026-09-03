@@ -83,6 +83,7 @@ private Q_SLOTS:
     void testRemoveLineBreaks_data();
     void testRemoveLineBreaks();
     void testClickInternalLink();
+    void testOpenAuxiliaryViewWithoutLink();
     void testAuxiliaryDocumentWorkspace();
     void testFindBarDoesNotConsumeWorkspaceHeight();
     void testScrollBarAndMouseWheel();
@@ -686,6 +687,42 @@ void PartTest::testClickInternalLink()
 
     // make sure cursor goes back to being an open hand again.  Bug 421437
     QTRY_COMPARE_WITH_TIMEOUT(part.m_pageView->cursor().shape(), Qt::OpenHandCursor, 1000);
+}
+
+void PartTest::testOpenAuxiliaryViewWithoutLink()
+{
+    Okular::Part part(nullptr, {});
+    QVERIFY(openDocument(&part, QStringLiteral(KDESRCDIR "data/file1.pdf")));
+    part.widget()->show();
+    if (qgetenv("KDECI_CANNOT_CREATE_WINDOWS") == "1") {
+        QSKIP("KDE CI can't create a window on this platform, skipping some gui tests");
+    }
+    QVERIFY(QTest::qWaitForWindowExposed(part.widget()));
+
+    DocumentWorkspace *workspace = part.m_documentWorkspace;
+    PageView *mainView = part.m_pageView;
+    QVERIFY(workspace);
+    QCOMPARE(workspace->auxiliaryViewCount(), 0);
+
+    // The auxiliary workspace must be usable without a link. The action
+    // clones the active frame's current viewport into a new independent tab.
+    QAction *openAuxiliaryView = part.actionCollection()->action(QStringLiteral("open_auxiliary_view"));
+    QVERIFY(openAuxiliaryView);
+    QVERIFY(openAuxiliaryView->isEnabled());
+    const DocumentViewport target = mainView->documentViewport();
+    openAuxiliaryView->trigger();
+
+    QTRY_COMPARE(workspace->auxiliaryViewCount(), 1);
+    QPointer<PageView> auxiliaryView = workspace->auxiliaryViews().constFirst();
+    QVERIFY(auxiliaryView);
+    QVERIFY(auxiliaryView->documentViewport() == target);
+    QVERIFY(!workspace->viewTitle(auxiliaryView).isEmpty());
+    QTRY_COMPARE(workspace->activeView(), auxiliaryView.data());
+
+    workspace->closeAuxiliaryTab(0);
+    QTRY_COMPARE(workspace->auxiliaryViewCount(), 0);
+    QTRY_VERIFY(auxiliaryView.isNull());
+    QTRY_COMPARE(workspace->activeView(), mainView);
 }
 
 void PartTest::testAuxiliaryDocumentWorkspace()

@@ -4942,7 +4942,7 @@ QMenu *PageView::createProcessLinkMenu(PageViewItem *item, const QPoint eventPos
         processLink->setObjectName(QStringLiteral("ProcessLinkAction"));
         Okular::DocumentViewport target;
         if (viewportForInternalGotoLink(d->document, rect, &target)) {
-            QAction *openInAuxiliaryFrame = menu->addAction(QIcon::fromTheme(QStringLiteral("view-split-left-right")), i18n("Open in Auxiliary Frame"));
+            QAction *openInAuxiliaryFrame = menu->addAction(QIcon::fromTheme(QStringLiteral("view-right-new")), i18n("Open in Auxiliary Frame"));
             openInAuxiliaryFrame->setObjectName(QStringLiteral("OpenLinkInAuxiliaryFrameAction"));
             connect(openInAuxiliaryFrame, &QAction::triggered, this, [this, rect, eventPos]() {
                 requestInternalLinkInAuxiliaryFrame(rect, eventPos);
