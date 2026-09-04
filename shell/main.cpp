@@ -274,6 +274,9 @@ static int runMengsheeApplication(int argc, char **argv)
     parser.addOption(QCommandLineOption(QStringList() << QStringLiteral("noraise"), i18n("Not raise window")));
     parser.addOption(QCommandLineOption(QStringList() << QStringLiteral("find"), i18n("Find a string on the text"), QStringLiteral("string")));
     parser.addOption(QCommandLineOption(QStringList() << QStringLiteral("editor-cmd"), i18n("Sets the external editor command"), QStringLiteral("string")));
+    QCommandLineOption newProcessOption(QStringList() << QStringLiteral("new-process"), i18n("Open documents in a separate process"));
+    newProcessOption.setFlags(QCommandLineOption::HiddenFromHelp);
+    parser.addOption(newProcessOption);
     parser.addPositionalArgument(QStringLiteral("urls"), i18n("Documents to open. Specify '-' to read from stdin."));
 
     parser.process(app);
@@ -288,7 +291,7 @@ static int runMengsheeApplication(int argc, char **argv)
         for (int i = 0; i < parser.positionalArguments().count(); ++i) {
             paths << parser.positionalArguments().at(i);
         }
-        Okular::Status status = Okular::main(paths, ShellUtils::serializeOptions(parser));
+        Okular::Status status = Okular::main(paths, ShellUtils::serializeOptions(parser), parser.isSet(newProcessOption));
         switch (status) {
         case Okular::Error:
             return -1;

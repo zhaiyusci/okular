@@ -5796,7 +5796,13 @@ bool Document::canInsertPageFromPdf() const
     return pageInsertion && pageInsertion->canInsertPageFromPdf();
 }
 
-bool Document::saveWithPdfPageInsertedAfter(const QString &sourceFileName, const QString &outputFileName, int pageNumber, const QString &insertedFileName, int pageToInsert, QString *errorText)
+bool Document::saveWithPdfPageInsertedAfter(const QString &sourceFileName,
+                                            const QString &outputFileName,
+                                            int pageNumber,
+                                            const QString &insertedFileName,
+                                            int pageToInsert,
+                                            bool resolveDestinationConflicts,
+                                            QString *errorText)
 {
     auto pageInsertion = dynamic_cast<PageInsertionInterface *>(d->m_generator);
     if (!pageInsertion || sourceFileName.isEmpty() || outputFileName.isEmpty() || insertedFileName.isEmpty()) {
@@ -5806,7 +5812,42 @@ bool Document::saveWithPdfPageInsertedAfter(const QString &sourceFileName, const
         return false;
     }
 
-    return pageInsertion->saveWithPdfPageInsertedAfter(sourceFileName, outputFileName, pageNumber, insertedFileName, pageToInsert, errorText);
+    return pageInsertion->saveWithPdfPageInsertedAfter(sourceFileName, outputFileName, pageNumber, insertedFileName, pageToInsert, resolveDestinationConflicts, errorText);
+}
+
+bool Document::canCombinePdfFiles() const
+{
+    const auto pageInsertion = dynamic_cast<PageInsertionInterface *>(d->m_generator);
+    return pageInsertion && pageInsertion->canCombinePdfFiles();
+}
+
+int Document::pdfPageCount(const QString &inputFileName, QString *errorText)
+{
+    auto pageInsertion = dynamic_cast<PageInsertionInterface *>(d->m_generator);
+    if (!pageInsertion || inputFileName.isEmpty()) {
+        if (errorText) {
+            *errorText = QString();
+        }
+        return -1;
+    }
+
+    return pageInsertion->pdfPageCount(inputFileName, errorText);
+}
+
+bool Document::combinePdfFiles(const QStringList &inputFileNames,
+                               const QString &outputFileName,
+                               bool resolveDestinationConflicts,
+                               QString *errorText)
+{
+    auto pageInsertion = dynamic_cast<PageInsertionInterface *>(d->m_generator);
+    if (!pageInsertion || inputFileNames.size() < 2 || outputFileName.isEmpty()) {
+        if (errorText) {
+            *errorText = QString();
+        }
+        return false;
+    }
+
+    return pageInsertion->combinePdfFiles(inputFileNames, outputFileName, resolveDestinationConflicts, errorText);
 }
 
 bool Document::canDeletePage() const

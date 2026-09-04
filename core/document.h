@@ -1005,9 +1005,38 @@ public:
      * Writes @p outputFileName as a copy of @p sourceFileName with page
      * @p pageToInsert from @p insertedFileName inserted after @p pageNumber.
      * Both page numbers are 1-based except @p pageNumber, where 0 means insert
-     * before the first page.
+     * before the first page. Local links are always retained. If
+     * @p resolveDestinationConflicts is true, copied named destinations receive
+     * a common unique suffix and matching links are rewritten.
      */
-    bool saveWithPdfPageInsertedAfter(const QString &sourceFileName, const QString &outputFileName, int pageNumber, const QString &insertedFileName, int pageToInsert, QString *errorText);
+    bool saveWithPdfPageInsertedAfter(const QString &sourceFileName,
+                                      const QString &outputFileName,
+                                      int pageNumber,
+                                      const QString &insertedFileName,
+                                      int pageToInsert,
+                                      bool resolveDestinationConflicts,
+                                      QString *errorText);
+
+    /**
+     * Returns whether the current document backend can combine complete PDF
+     * files into a new PDF.
+     */
+    bool canCombinePdfFiles() const;
+
+    /**
+     * Returns the number of pages in @p inputFileName, or -1 on error.
+     */
+    int pdfPageCount(const QString &inputFileName, QString *errorText);
+
+    /**
+     * Combines @p inputFileNames, in order, into @p outputFileName. If
+     * @p resolveDestinationConflicts is true, every source PDF receives a
+     * distinct suffixed named-destination namespace.
+     */
+    bool combinePdfFiles(const QStringList &inputFileNames,
+                         const QString &outputFileName,
+                         bool resolveDestinationConflicts,
+                         QString *errorText);
 
     /**
      * Returns whether the current document backend can write a copy with a page

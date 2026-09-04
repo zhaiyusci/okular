@@ -41,6 +41,7 @@
 #if HAVE_DBUS
 #include <QDBusConnection>
 #endif // HAVE_DBUS
+#include <QDir>
 #include <QDockWidget>
 #include <QDragMoveEvent>
 #include <QFileDialog>
@@ -50,6 +51,7 @@
 #include <QMimeData>
 #include <QObject>
 #include <QPointer>
+#include <QProcess>
 #include <QScreen>
 #include <QTabBar>
 #include <QTabWidget>
@@ -475,9 +477,16 @@ void Shell::openUrl(const QUrl &url, const QString &serializedOptions)
             if (qobject_cast<Okular::ViewerInterface *>(activePart)->openNewFilesInTabs()) {
                 openNewTab(url, serializedOptions);
             } else {
+#ifdef Q_OS_WIN
+                const QString target = url.isLocalFile() ? url.toLocalFile() : url.toString(QUrl::FullyEncoded);
+                if (!launchDetachedDocument(target)) {
+                    KMessageBox::error(this, i18n("Could not open the document in a separate process."));
+                }
+#else
                 Shell *newShell = new Shell(serializedOptions);
                 newShell->show();
                 newShell->openUrl(url, serializedOptions);
+#endif
             }
         }
     } else {
@@ -1077,12 +1086,39 @@ void Shell::connectPart(const KParts::ReadWritePart *part)
     connect(part, SIGNAL(mimeTypeChanged(QMimeType)), this, SLOT(setTabIcon(QMimeType)));         // clazy:exclude=old-style-connect
     connect(part, SIGNAL(urlsDropped(QList<QUrl>)), this, SLOT(handleDroppedUrls(QList<QUrl>)));  // clazy:exclude=old-style-connect
     connect(part, SIGNAL(maxRecentItemsChanged(int)), this, SLOT(triggerUpdateRecentItems(int))); // clazy:exclude=old-style-connect
+    connect(part, SIGNAL(requestOpenNewFile(QString)), this, SLOT(openGeneratedFile(QString)));   // clazy:exclude=old-style-connect
 
     // clang-format off
     connect(part, SIGNAL(requestOpenNewlySignedFile(QString,int)), this, SLOT(openNewlySignedFile(QString,int))); // clazy:exclude=old-style-connect
     // Otherwise the QSize,QSize gets turned into QSize, QSize that is not normalized signals and is slightly slower
     connect(part, SIGNAL(fitWindowToPage(QSize,QSize)), this, SLOT(slotFitWindowToPage(QSize,QSize)));   // clazy:exclude=old-style-connect
     // clang-format on
+}
+
+void Shell::openGeneratedFile(const QString &path)
+{
+    if (path.isEmpty()) {
+        return;
+    }
+
+    if (!launchDetachedDocument(path)) {
+        KMessageBox::error(this, i18n("Could not open the generated PDF in a separate process."));
+    }
+}
+
+bool Shell::launchDetachedDocument(const QString &path)
+{
+    QProcess process;
+#ifdef OKULAR_BINARY
+    process.setProgram(QStringLiteral(OKULAR_BINARY));
+#else
+    process.setProgram(QCoreApplication::applicationFilePath());
+#endif
+    const QUrl targetUrl(path);
+    const QString argument = targetUrl.isValid() && !targetUrl.scheme().isEmpty() ? path : QDir::toNativeSeparators(path);
+    process.setArguments({QStringLiteral("--new-process"), argument});
+    process.setWorkingDirectory(QCoreApplication::applicationDirPath());
+    return process.startDetached();
 }
 
 void Shell::print()

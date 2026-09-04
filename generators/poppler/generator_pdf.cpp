@@ -2785,9 +2785,45 @@ bool PDFGenerator::canInsertPageFromPdf() const
     return true;
 }
 
-bool PDFGenerator::saveWithPdfPageInsertedAfter(const QString &sourceFileName, const QString &outputFileName, int pageNumber, const QString &insertedFileName, int pageToInsert, QString *errorText)
+bool PDFGenerator::saveWithPdfPageInsertedAfter(const QString &sourceFileName,
+                                                const QString &outputFileName,
+                                                int pageNumber,
+                                                const QString &insertedFileName,
+                                                int pageToInsert,
+                                                bool resolveDestinationConflicts,
+                                                QString *errorText)
 {
-    return runPdfPagesOperation([&] { return PdfPageSequenceEditor::insertPdfPageAfter(pdfPagesFileName(sourceFileName), pdfPagesFileName(outputFileName), pageNumber, pdfPagesFileName(insertedFileName), pageToInsert); }, errorText);
+    const auto conflictPolicy = resolveDestinationConflicts ? PdfPageSequenceEditor::NamedDestinationConflictPolicy::AddSuffixes : PdfPageSequenceEditor::NamedDestinationConflictPolicy::KeepNames;
+    return runPdfPagesOperation([&] { return PdfPageSequenceEditor::insertPdfPageAfter(pdfPagesFileName(sourceFileName), pdfPagesFileName(outputFileName), pageNumber, pdfPagesFileName(insertedFileName), pageToInsert, conflictPolicy); }, errorText);
+}
+
+bool PDFGenerator::canCombinePdfFiles() const
+{
+    return true;
+}
+
+int PDFGenerator::pdfPageCount(const QString &inputFileName, QString *errorText)
+{
+    std::string operationError;
+    const int count = PdfPageSequenceEditor::pageCount(pdfPagesFileName(inputFileName), &operationError);
+    if (errorText) {
+        *errorText = QString::fromStdString(operationError);
+    }
+    return count;
+}
+
+bool PDFGenerator::combinePdfFiles(const QStringList &inputFileNames,
+                                   const QString &outputFileName,
+                                   bool resolveDestinationConflicts,
+                                   QString *errorText)
+{
+    std::vector<std::string> inputs;
+    inputs.reserve(inputFileNames.size());
+    for (const QString &inputFileName : inputFileNames) {
+        inputs.push_back(pdfPagesFileName(inputFileName));
+    }
+    const auto conflictPolicy = resolveDestinationConflicts ? PdfPageSequenceEditor::NamedDestinationConflictPolicy::AddSuffixes : PdfPageSequenceEditor::NamedDestinationConflictPolicy::KeepNames;
+    return runPdfPagesOperation([&] { return PdfPageSequenceEditor::combinePdfFiles(inputs, pdfPagesFileName(outputFileName), conflictPolicy); }, errorText);
 }
 
 bool PDFGenerator::canDeletePage() const

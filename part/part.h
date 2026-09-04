@@ -212,6 +212,8 @@ Q_SIGNALS:
      * \param pageNumber page to show (1-indexed)
      */
     void requestOpenNewlySignedFile(const QString &path, int pageNumber);
+    /** Request that the shell open a generated PDF without replacing this tab. */
+    void requestOpenNewFile(const QString &path);
 
 protected:
     // reimplemented from KParts::ReadWritePart
@@ -496,6 +498,7 @@ private:
     KToggleFullScreenAction *m_showFullScreenAction;
     QAction *m_aboutBackend;
     QAction *m_reload;
+    QAction *m_combinePdfFiles = nullptr;
     QAction *m_addCurrentPageToContents = nullptr;
     QAction *m_insertPage = nullptr;
     QAction *m_setPageTemplate = nullptr;
@@ -545,6 +548,7 @@ private:
     QString m_latexStemtexTexmfRoot;
 
 private Q_SLOTS:
+    void slotCombinePdfFiles();
     void slotInsertPage();
     void slotSetPageTemplate();
     void slotInsertPageFromTemplate();

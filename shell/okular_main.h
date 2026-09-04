@@ -16,7 +16,7 @@ namespace Okular
 {
 enum Status { Error, AttachedOtherProcess, Success };
 
-Status main(const QStringList &paths, const QString &serializedOptions);
+Status main(const QStringList &paths, const QString &serializedOptions, bool forceNewProcess = false);
 
 }
 

@@ -187,7 +187,7 @@ static bool attachExistingInstance(const QStringList &paths, const QString &seri
 
 namespace Okular
 {
-Status main(const QStringList &paths, const QString &serializedOptions)
+Status main(const QStringList &paths, const QString &serializedOptions, bool forceNewProcess)
 {
     if (ShellUtils::unique(serializedOptions) && paths.count() > 1) {
         QTextStream stream(stderr);
@@ -220,7 +220,7 @@ Status main(const QStringList &paths, const QString &serializedOptions)
     }
 
     // try to attach to existing session, unique or not
-    if (attachUniqueInstance(paths, serializedOptions) || attachExistingInstance(paths, serializedOptions)) {
+    if (!forceNewProcess && (attachUniqueInstance(paths, serializedOptions) || attachExistingInstance(paths, serializedOptions))) {
         return AttachedOtherProcess;
     }
 

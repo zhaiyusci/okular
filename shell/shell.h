@@ -93,6 +93,7 @@ protected:
     void readSettings();
     void writeSettings();
     void setFullScreen(bool);
+    virtual bool launchDetachedDocument(const QString &path);
 
     using KParts::MainWindow::setCaption;
     void setCaption(const QString &caption) override;
@@ -109,6 +110,7 @@ private Q_SLOTS:
     void slotShowMenubar();
 
     void openUrl(const QUrl &url, const QString &serializedOptions = QString());
+    void openGeneratedFile(const QString &path);
     void showOpenRecentMenu();
     void closeUrl();
     void print();

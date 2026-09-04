@@ -25,6 +25,7 @@
 #include <QSharedDataPointer>
 #include <QSizeF>
 #include <QString>
+#include <QStringList>
 #include <QVariant>
 
 #include <KPluginFactory>
@@ -203,9 +204,38 @@ public:
      * Writes @p outputFileName as a copy of @p sourceFileName with page
      * @p pageToInsert from @p insertedFileName inserted after @p pageNumber.
      * Both page numbers are 1-based except @p pageNumber, where 0 means insert
-     * before the first page.
+     * before the first page. Local links are always retained. If
+     * @p resolveDestinationConflicts is true, named destinations copied with
+     * the page receive a common unique suffix and matching links are rewritten.
      */
-    virtual bool saveWithPdfPageInsertedAfter(const QString &sourceFileName, const QString &outputFileName, int pageNumber, const QString &insertedFileName, int pageToInsert, QString *errorText) = 0;
+    virtual bool saveWithPdfPageInsertedAfter(const QString &sourceFileName,
+                                              const QString &outputFileName,
+                                              int pageNumber,
+                                              const QString &insertedFileName,
+                                              int pageToInsert,
+                                              bool resolveDestinationConflicts,
+                                              QString *errorText) = 0;
+
+    /**
+     * Returns whether this generator can combine complete PDF files.
+     */
+    virtual bool canCombinePdfFiles() const = 0;
+
+    /**
+     * Returns the number of pages in @p inputFileName, or -1 on error.
+     */
+    virtual int pdfPageCount(const QString &inputFileName, QString *errorText) = 0;
+
+    /**
+     * Combines @p inputFileNames, in order, into @p outputFileName. Local links
+     * are always retained. If @p resolveDestinationConflicts is true, each
+     * source PDF receives its own suffixed named-destination namespace and
+     * matching links are rewritten.
+     */
+    virtual bool combinePdfFiles(const QStringList &inputFileNames,
+                                 const QString &outputFileName,
+                                 bool resolveDestinationConflicts,
+                                 QString *errorText) = 0;
 
     /**
      * Returns whether this generator can write a copy of the document with a

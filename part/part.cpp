@@ -40,6 +40,7 @@
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileDialog>
+#include <QFileIconProvider>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -48,6 +49,7 @@
 #include <QLabel>
 #include <QLayout>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMimeDatabase>
@@ -64,12 +66,14 @@
 #include <QStandardPaths>
 #include <QTemporaryFile>
 #include <QTimer>
+#include <QToolButton>
 #include <QUndoCommand>
 #include <QVBoxLayout>
 #include <QWidgetAction>
 
 #include <exception>
 #include <memory>
+#include <optional>
 
 #include <KAboutPluginDialog>
 #include <KActionCollection>
@@ -206,6 +210,21 @@ private:
 #endif
 
 K_PLUGIN_FACTORY_WITH_JSON(OkularPartFactory, "okular_part.json", registerPlugin<Okular::Part>();)
+
+static std::optional<bool> askWhetherToResolveDestinationConflicts(QWidget *parent)
+{
+    const KMessageBox::ButtonCode choice = KMessageBox::questionTwoActionsCancel(
+        parent,
+        i18n("The copied page may contain named destinations that already exist in this document.\n\n"
+             "Add a suffix to give the copied destinations their own names and update matching links, or keep the original names as they are. All links are retained in either mode."),
+        i18n("Named Destination Conflicts"),
+        KGuiItem(i18nc("@action:button", "Add Suffixes"), QStringLiteral("edit-rename")),
+        KGuiItem(i18nc("@action:button", "Keep Names As Is"), QStringLiteral("insert-link")));
+    if (choice == KMessageBox::Cancel) {
+        return std::nullopt;
+    }
+    return choice == KMessageBox::PrimaryAction;
+}
 
 static QAction *actionForExportFormat(const Okular::ExportFormat &format, QObject *parent = Q_NULLPTR)
 {
@@ -966,6 +985,12 @@ void Part::setupViewerActions()
     connect(reloadAction, &QAction::triggered, this, &Part::slotReload);
     ac->setDefaultShortcuts(reloadAction, KStandardShortcut::reload());
     m_reload = reloadAction;
+
+    m_combinePdfFiles = ac->addAction(QStringLiteral("file_combine_pdfs"));
+    m_combinePdfFiles->setText(i18n("Combine PDF Files..."));
+    m_combinePdfFiles->setIcon(QIcon::fromTheme(QStringLiteral("document-merge"), QIcon::fromTheme(QStringLiteral("document-import"))));
+    m_combinePdfFiles->setEnabled(true);
+    connect(m_combinePdfFiles, &QAction::triggered, this, &Part::slotCombinePdfFiles);
 
     m_addCurrentPageToContents = ac->addAction(QStringLiteral("tools_add_current_page_to_contents"));
     m_addCurrentPageToContents->setText(i18n("Add Current Page to Contents"));
@@ -3842,6 +3867,9 @@ void Part::refreshTemplateNotes()
 void Part::updatePageEditActions()
 {
     const bool canEditPages = canUsePageLevelEditing();
+    if (m_combinePdfFiles) {
+        m_combinePdfFiles->setEnabled(!m_document->isOpened() || m_document->canCombinePdfFiles());
+    }
     if (m_insertPage) {
         m_insertPage->setEnabled(canEditPages && (m_document->canInsertBlankPage() || m_document->canInsertPageFromPdf()));
     }
@@ -3857,6 +3885,266 @@ void Part::updatePageEditActions()
     if (m_deleteCurrentPage) {
         m_deleteCurrentPage->setEnabled(canEditPages && m_document->canDeletePage() && m_document->pages() > 1);
     }
+}
+
+void Part::slotCombinePdfFiles()
+{
+    const bool includeCurrentDocument = canUsePageLevelEditing() && m_document->canCombinePdfFiles();
+    const QString currentFileName = includeCurrentDocument ? QFileInfo(url().toLocalFile()).absoluteFilePath() : QString();
+    if (includeCurrentDocument && (currentFileName.isEmpty() || !QFileInfo::exists(currentFileName))) {
+        KMessageBox::information(widget(), i18n("The current PDF file could not be found on disk."));
+        return;
+    }
+
+    std::unique_ptr<Document> standaloneBackendDocument;
+    Document *backendDocument = m_document->canCombinePdfFiles() ? m_document : nullptr;
+    QString backendFileName = currentFileName;
+
+    auto sameFile = [](const QString &left, const QString &right) {
+        const QFileInfo leftInfo(left);
+        const QFileInfo rightInfo(right);
+        const QString leftPath = leftInfo.exists() ? leftInfo.canonicalFilePath() : leftInfo.absoluteFilePath();
+        const QString rightPath = rightInfo.exists() ? rightInfo.canonicalFilePath() : rightInfo.absoluteFilePath();
+        return leftPath.compare(rightPath, Qt::CaseInsensitive) == 0;
+    };
+
+    QDialog dialog(widget());
+    dialog.setWindowTitle(i18n("Combine PDF Files"));
+    dialog.resize(900, 560);
+    auto *layout = new QVBoxLayout(&dialog);
+
+    auto *heading = new QLabel(i18n("Arrange the PDF files in the order they should appear in the new document."), &dialog);
+    heading->setWordWrap(true);
+    layout->addWidget(heading);
+
+    auto *toolRow = new QHBoxLayout;
+    auto *addButton = new QToolButton(&dialog);
+    addButton->setText(i18n("Add Files..."));
+    addButton->setIcon(QIcon::fromTheme(QStringLiteral("list-add")));
+    addButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    toolRow->addWidget(addButton);
+
+    auto *removeButton = new QToolButton(&dialog);
+    removeButton->setText(i18n("Remove"));
+    removeButton->setIcon(QIcon::fromTheme(QStringLiteral("list-remove")));
+    removeButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    toolRow->addWidget(removeButton);
+
+    auto *moveLeftButton = new QToolButton(&dialog);
+    moveLeftButton->setText(i18n("Move Left"));
+    moveLeftButton->setIcon(QIcon::fromTheme(QStringLiteral("arrow-left")));
+    moveLeftButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    toolRow->addWidget(moveLeftButton);
+
+    auto *moveRightButton = new QToolButton(&dialog);
+    moveRightButton->setText(i18n("Move Right"));
+    moveRightButton->setIcon(QIcon::fromTheme(QStringLiteral("arrow-right")));
+    moveRightButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    toolRow->addWidget(moveRightButton);
+    toolRow->addStretch();
+    layout->addLayout(toolRow);
+
+    auto *fileList = new QListWidget(&dialog);
+    fileList->setViewMode(QListView::IconMode);
+    fileList->setFlow(QListView::LeftToRight);
+    fileList->setWrapping(true);
+    fileList->setResizeMode(QListView::Adjust);
+    fileList->setMovement(QListView::Snap);
+    fileList->setDragDropMode(QAbstractItemView::InternalMove);
+    fileList->setDefaultDropAction(Qt::MoveAction);
+    fileList->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    fileList->setIconSize(QSize(72, 72));
+    fileList->setGridSize(QSize(205, 140));
+    fileList->setSpacing(8);
+    layout->addWidget(fileList, 1);
+
+    auto *optionsRow = new QHBoxLayout;
+    optionsRow->addWidget(new QLabel(i18n("Named destinations:"), &dialog));
+    auto *destinationConflictPolicy = new QComboBox(&dialog);
+    destinationConflictPolicy->addItem(i18n("Add a separate suffix for each PDF"), true);
+    destinationConflictPolicy->addItem(i18n("Keep destination names as they are"), false);
+    destinationConflictPolicy->setToolTip(i18n("All links are retained. Adding suffixes isolates each PDF's named destinations and rewrites its matching internal links."));
+    optionsRow->addWidget(destinationConflictPolicy, 1);
+    layout->addLayout(optionsRow);
+
+    auto *buttonBox = new QDialogButtonBox(QDialogButtonBox::Cancel, &dialog);
+    auto *combineButton = buttonBox->addButton(i18nc("@action:button", "Combine"), QDialogButtonBox::AcceptRole);
+    combineButton->setIcon(QIcon::fromTheme(QStringLiteral("document-save")));
+    layout->addWidget(buttonBox);
+
+    QFileIconProvider iconProvider;
+    const QIcon pdfIcon = QIcon::fromTheme(QStringLiteral("application-pdf"), iconProvider.icon(QFileIconProvider::File));
+    auto ensureCombineBackend = [&](const QFileInfo &info, QString *errorText) {
+        if (backendDocument && backendDocument->canCombinePdfFiles()) {
+            return true;
+        }
+        if (!info.exists() || !info.isFile()) {
+            *errorText = i18n("The file no longer exists.");
+            return false;
+        }
+
+        auto candidate = std::make_unique<Document>(widget());
+        QMimeDatabase mimeDatabase;
+        const QMimeType mimeType = mimeDatabase.mimeTypeForFile(info.absoluteFilePath(), QMimeDatabase::MatchContent);
+        const Document::OpenResult openResult = candidate->openDocument(info.absoluteFilePath(), QUrl::fromLocalFile(info.absoluteFilePath()), mimeType);
+        if (openResult != Document::OpenSuccess) {
+            if (openResult == Document::OpenNeedsPassword) {
+                *errorText = i18n("The PDF is password-protected.");
+            } else {
+                *errorText = candidate->openError().isEmpty() ? i18n("The PDF backend could not open the file.") : candidate->openError();
+            }
+            return false;
+        }
+        if (!candidate->canCombinePdfFiles()) {
+            *errorText = i18n("The selected file is not supported by the PDF combine backend.");
+            return false;
+        }
+
+        backendFileName = info.absoluteFilePath();
+        backendDocument = candidate.get();
+        standaloneBackendDocument = std::move(candidate);
+        return true;
+    };
+    auto addPdf = [&](const QString &fileName) {
+        const QFileInfo info(fileName);
+        QString errorText;
+        if (!ensureCombineBackend(info, &errorText)) {
+            KMessageBox::information(&dialog, i18n("Could not add %1. %2", info.fileName(), errorText));
+            return;
+        }
+
+        const int pageCount = !backendFileName.isEmpty() && sameFile(info.absoluteFilePath(), backendFileName) ? static_cast<int>(backendDocument->pages())
+                                                                                                             : backendDocument->pdfPageCount(info.absoluteFilePath(), &errorText);
+        if (pageCount < 1) {
+            const QString detail = errorText.isEmpty() ? i18n("The file could not be read as a PDF.") : errorText;
+            KMessageBox::information(&dialog, i18n("Could not add %1. %2", info.fileName(), detail));
+            return;
+        }
+
+        auto *item = new QListWidgetItem(pdfIcon, i18np("%2\n%1 page", "%2\n%1 pages", pageCount, info.fileName()), fileList);
+        item->setData(Qt::UserRole, info.absoluteFilePath());
+        item->setToolTip(i18np("%2\n%1 page", "%2\n%1 pages", pageCount, info.absoluteFilePath()));
+        item->setTextAlignment(Qt::AlignHCenter);
+        item->setSizeHint(fileList->gridSize());
+        fileList->setCurrentItem(item);
+    };
+
+    auto updateButtons = [&] {
+        const int row = fileList->currentRow();
+        const bool hasSelection = !fileList->selectedItems().isEmpty();
+        removeButton->setEnabled(hasSelection);
+        moveLeftButton->setEnabled(fileList->selectedItems().size() == 1 && row > 0);
+        moveRightButton->setEnabled(fileList->selectedItems().size() == 1 && row >= 0 && row + 1 < fileList->count());
+        combineButton->setEnabled(fileList->count() >= 2);
+    };
+
+    connect(addButton, &QToolButton::clicked, &dialog, [&] {
+        QString initialDirectory;
+        if (fileList->count() > 0) {
+            initialDirectory = QFileInfo(fileList->item(fileList->count() - 1)->data(Qt::UserRole).toString()).absolutePath();
+        } else if (!currentFileName.isEmpty()) {
+            initialDirectory = QFileInfo(currentFileName).absolutePath();
+        } else {
+            initialDirectory = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        }
+        const QStringList fileNames = QFileDialog::getOpenFileNames(&dialog, i18n("Add PDF Files"), initialDirectory, i18n("PDF Documents (*.pdf)"));
+        for (const QString &fileName : fileNames) {
+            addPdf(fileName);
+        }
+        updateButtons();
+    });
+    connect(removeButton, &QToolButton::clicked, &dialog, [&] {
+        const QList<QListWidgetItem *> selected = fileList->selectedItems();
+        for (QListWidgetItem *item : selected) {
+            delete fileList->takeItem(fileList->row(item));
+        }
+        updateButtons();
+    });
+    auto moveCurrentItem = [&](int offset) {
+        const int row = fileList->currentRow();
+        const int destination = row + offset;
+        if (row < 0 || destination < 0 || destination >= fileList->count()) {
+            return;
+        }
+        QListWidgetItem *item = fileList->takeItem(row);
+        fileList->insertItem(destination, item);
+        fileList->setCurrentItem(item);
+        updateButtons();
+    };
+    connect(moveLeftButton, &QToolButton::clicked, &dialog, [&] { moveCurrentItem(-1); });
+    connect(moveRightButton, &QToolButton::clicked, &dialog, [&] { moveCurrentItem(1); });
+    connect(fileList, &QListWidget::itemSelectionChanged, &dialog, updateButtons);
+    connect(fileList->model(), &QAbstractItemModel::rowsMoved, &dialog, [&] { updateButtons(); });
+    connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (!currentFileName.isEmpty()) {
+        addPdf(currentFileName);
+    }
+    updateButtons();
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    QStringList inputFiles;
+    inputFiles.reserve(fileList->count());
+    for (int row = 0; row < fileList->count(); ++row) {
+        inputFiles.append(fileList->item(row)->data(Qt::UserRole).toString());
+    }
+    if (inputFiles.size() < 2) {
+        return;
+    }
+
+    const QString suggestedOutput = QFileInfo(inputFiles.constFirst()).absolutePath() + QLatin1String("/Combined.pdf");
+    QString outputFileName = QFileDialog::getSaveFileName(widget(), i18n("Save Combined PDF"), suggestedOutput, i18n("PDF Documents (*.pdf)"));
+    if (outputFileName.isEmpty()) {
+        return;
+    }
+    if (QFileInfo(outputFileName).suffix().isEmpty()) {
+        outputFileName += QStringLiteral(".pdf");
+    }
+
+    for (const QString &inputFile : std::as_const(inputFiles)) {
+        if (sameFile(inputFile, outputFileName)) {
+            KMessageBox::information(widget(), i18n("The combined PDF must be saved to a different file from every input PDF."));
+            return;
+        }
+    }
+
+    std::unique_ptr<QTemporaryFile> currentSnapshot;
+    QString snapshotFileName;
+    if (!currentFileName.isEmpty()) {
+        if (documentHasTemplateNotes()) {
+            refreshTemplateNotes();
+        }
+        QString snapshotErrorText;
+        const PageEditSourceSnapshotResult snapshotResult = createPageEditSourceSnapshot(m_document, QStringLiteral("mengshee-combine-source"), currentSnapshot, snapshotFileName, snapshotErrorText);
+        if (snapshotResult != PageEditSourceSnapshotResult::Success) {
+            const QString detail = snapshotErrorText.isEmpty() ? i18n("Could not create a snapshot of the current PDF.") : snapshotErrorText;
+            KMessageBox::information(widget(), i18n("Could not prepare the current PDF for combining. %1", detail));
+            return;
+        }
+        for (QString &inputFile : inputFiles) {
+            if (sameFile(inputFile, currentFileName)) {
+                inputFile = snapshotFileName;
+            }
+        }
+    }
+
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    QString errorText;
+    const bool combined = backendDocument && backendDocument->combinePdfFiles(inputFiles, outputFileName, destinationConflictPolicy->currentData().toBool(), &errorText);
+    QApplication::restoreOverrideCursor();
+    if (!combined) {
+        if (errorText.isEmpty()) {
+            KMessageBox::information(widget(), i18n("Could not combine the selected PDF files."));
+        } else {
+            KMessageBox::information(widget(), i18n("Could not combine the selected PDF files. %1", errorText));
+        }
+        return;
+    }
+
+    Q_EMIT requestOpenNewFile(QFileInfo(outputFileName).absoluteFilePath());
 }
 
 void Part::slotInsertBlankPageAfterCurrentPage()
@@ -4115,6 +4403,11 @@ void Part::duplicatePage(int pageNumber)
         return;
     }
 
+    const std::optional<bool> resolveDestinationConflicts = askWhetherToResolveDestinationConflicts(widget());
+    if (!resolveDestinationConflicts) {
+        return;
+    }
+
     const int pageCount = static_cast<int>(m_document->pages());
     if (pageNumber < 0 || pageNumber >= pageCount) {
         KMessageBox::information(widget(), i18n("The target page could not be found."));
@@ -4159,7 +4452,7 @@ void Part::duplicatePage(int pageNumber)
 
     const int pageNumberOneBased = pageNumber + 1;
     QString errorText;
-    if (!m_document->saveWithPdfPageInsertedAfter(sourceFileName, editedFile->fileName(), pageNumberOneBased, sourceFileName, pageNumberOneBased, &errorText)) {
+    if (!m_document->saveWithPdfPageInsertedAfter(sourceFileName, editedFile->fileName(), pageNumberOneBased, sourceFileName, pageNumberOneBased, *resolveDestinationConflicts, &errorText)) {
         if (errorText.isEmpty()) {
             KMessageBox::information(widget(), i18n("Could not duplicate the page."));
         } else {
@@ -4282,6 +4575,11 @@ void Part::insertPdfPage(int insertAfterPageNumber, const QString &insertedFileN
         return;
     }
 
+    const std::optional<bool> resolveDestinationConflicts = askWhetherToResolveDestinationConflicts(widget());
+    if (!resolveDestinationConflicts) {
+        return;
+    }
+
     const int pageCount = static_cast<int>(m_document->pages());
     if (insertAfterPageNumber < -1 || insertAfterPageNumber >= pageCount) {
         KMessageBox::information(widget(), i18n("The target page could not be found."));
@@ -4332,7 +4630,7 @@ void Part::insertPdfPage(int insertAfterPageNumber, const QString &insertedFileN
 
     const int pageNumberOneBased = insertAfterPageNumber + 1;
     QString errorText;
-    if (!m_document->saveWithPdfPageInsertedAfter(sourceFileName, editedFile->fileName(), pageNumberOneBased, insertedFileName, pageToInsert, &errorText)) {
+    if (!m_document->saveWithPdfPageInsertedAfter(sourceFileName, editedFile->fileName(), pageNumberOneBased, insertedFileName, pageToInsert, *resolveDestinationConflicts, &errorText)) {
         if (errorText.isEmpty()) {
             KMessageBox::information(widget(), i18n("Could not insert the PDF page."));
         } else {

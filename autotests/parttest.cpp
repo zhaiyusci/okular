@@ -38,10 +38,13 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDesktopServices>
+#include <QDialog>
+#include <QHelpEvent>
 #include <QLayout>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMimeDatabase>
 #include <QPageRanges>
 #include <QPushButton>
 #include <QPrinter>
@@ -51,6 +54,7 @@
 #include <QTemporaryFile>
 #include <QTextEdit>
 #include <QTimer>
+#include <QToolTip>
 #include <QToolBar>
 #include <QTreeView>
 #include <QUrl>
@@ -104,6 +108,12 @@ private Q_SLOTS:
     void testRotateSinglePageBackend();
     void testRotateSinglePage();
     void testLatexNoteOnRotatedPage();
+    void testDeletePagePreservesInternalLinks();
+    void testDuplicatePagePreservesInternalLinks();
+    void testInsertPdfPagePreservesInternalLinks();
+    void testStandaloneCombineBackend();
+    void testCombinePdfAvailableWithoutDocument();
+    void testCombinePdfFilesPreservesSourceLinkNamespaces();
     void testMouseMoveOverLinkWhileInSelectionMode();
     void testClickUrlLinkWhileInSelectionMode();
     void testeTextSelectionOverAndAcrossLinks_data();
@@ -300,6 +310,41 @@ static bool findVisibleInternalGotoLink(PageView *view,
     *targetViewport = selectedTarget;
     *title = selectedTitle;
     return true;
+}
+
+static bool hasInternalGotoLinkToPage(Okular::Document *document, int sourcePageNumber, int targetPageNumber)
+{
+    if (!document) {
+        return false;
+    }
+
+    const Okular::Page *sourcePage = document->page(sourcePageNumber);
+    if (!sourcePage) {
+        return false;
+    }
+
+    for (const Okular::ObjectRect *rect : sourcePage->objectRects()) {
+        if (!rect || rect->objectType() != Okular::ObjectRect::Action || !rect->object()) {
+            continue;
+        }
+        const auto *action = static_cast<const Okular::Action *>(rect->object());
+        if (action->actionType() != Okular::Action::Goto) {
+            continue;
+        }
+        const auto *gotoAction = static_cast<const Okular::GotoAction *>(action);
+        if (gotoAction->isExternal()) {
+            continue;
+        }
+
+        Okular::DocumentViewport candidateTarget = gotoAction->destViewport();
+        if (!candidateTarget.isValid() && !gotoAction->destinationName().isEmpty()) {
+            candidateTarget = Okular::DocumentViewport(document->metaData(QStringLiteral("NamedViewport"), gotoAction->destinationName()).toString());
+        }
+        if (candidateTarget.isValid() && candidateTarget.pageNumber == targetPageNumber) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void PartTest::init()
@@ -681,6 +726,11 @@ void PartTest::testClickInternalLink()
     QVERIFY(findVisibleInternalGotoLink(part.m_pageView, part.m_document, 0, 1, expectedLinkTitle, &internalLinkPosition, &internalLinkTarget, &internalLinkTitle));
     QCOMPARE(internalLinkTitle, expectedLinkTitle);
     QCOMPARE(part.m_document->currentPage(), 0u);
+    QHelpEvent tooltipEvent(QEvent::ToolTip, internalLinkPosition, part.m_pageView->viewport()->mapToGlobal(internalLinkPosition));
+    QApplication::sendEvent(part.m_pageView->viewport(), &tooltipEvent);
+    QTRY_VERIFY(QToolTip::text().contains(QString::number(internalLinkTarget.pageNumber + 1)));
+    QTRY_VERIFY(QToolTip::text().contains(QStringLiteral("subsection.2.1")));
+    QToolTip::hideText();
     QTest::mouseMove(part.m_pageView->viewport(), internalLinkPosition);
     QTest::mouseClick(part.m_pageView->viewport(), Qt::LeftButton, Qt::NoModifier, internalLinkPosition);
     QTRY_COMPARE(part.m_document->currentPage(), static_cast<uint>(internalLinkTarget.pageNumber));
@@ -2239,6 +2289,315 @@ void PartTest::testLatexNoteOnRotatedPage()
     QVERIFY(reopenedAnnotation);
     QVERIFY(reopenedAnnotation->isOkularLatex());
     QVERIFY(reopenedAnnotation->flags() & Okular::Annotation::FixedRotation);
+}
+
+void PartTest::testDeletePagePreservesInternalLinks()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString workingFile = tempDir.filePath(QStringLiteral("internal-links-source.pdf"));
+    const QString editedFile = tempDir.filePath(QStringLiteral("internal-links-page-deleted.pdf"));
+    QVERIFY(QFile::copy(QStringLiteral(KDESRCDIR "data/pdf_with_internal_links.pdf"), workingFile));
+
+    Okular::Part editorPart(nullptr, {});
+    QVERIFY(openDocument(&editorPart, workingFile));
+    QString errorText;
+    QVERIFY2(editorPart.m_document->saveWithPageDeleted(workingFile, editedFile, 2, &errorText), qPrintable(errorText));
+
+    Okular::Part reopenedPart(nullptr, {});
+    QVERIFY(openDocument(&reopenedPart, editedFile));
+    QCOMPARE(reopenedPart.m_document->pages(), 2u);
+    reopenedPart.widget()->show();
+    if (qgetenv("KDECI_CANNOT_CREATE_WINDOWS") == "1") {
+        QSKIP("KDE CI can't create a window on this platform, skipping some GUI tests");
+    }
+    QVERIFY(QTest::qWaitForWindowExposed(reopenedPart.widget()));
+
+    reopenedPart.m_document->setViewportPage(0);
+    QTRY_VERIFY(reopenedPart.m_document->page(0)->hasPixmap(reopenedPart.m_pageView));
+    reopenedPart.m_document->requestTextPage(0);
+    QTRY_VERIFY(reopenedPart.m_document->page(0)->hasTextPage());
+
+    QPoint internalLinkPosition;
+    DocumentViewport internalLinkTarget;
+    QString internalLinkTitle;
+    const QString expectedLinkTitle = QStringLiteral("2.2 Example for list (enumerate)");
+    QVERIFY(findVisibleInternalGotoLink(reopenedPart.m_pageView, reopenedPart.m_document, 0, 1, expectedLinkTitle, &internalLinkPosition, &internalLinkTarget, &internalLinkTitle));
+    QCOMPARE(internalLinkTitle, expectedLinkTitle);
+    QCOMPARE(internalLinkTarget.pageNumber, 1);
+}
+
+void PartTest::testDuplicatePagePreservesInternalLinks()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString workingFile = tempDir.filePath(QStringLiteral("internal-links-source.pdf"));
+    const QString editedFile = tempDir.filePath(QStringLiteral("internal-links-page-duplicated.pdf"));
+    const QString editedAgainFile = tempDir.filePath(QStringLiteral("internal-links-page-duplicated-again.pdf"));
+    const QString asIsFile = tempDir.filePath(QStringLiteral("internal-links-page-duplicated-as-is.pdf"));
+    QVERIFY(QFile::copy(QStringLiteral(KDESRCDIR "data/pdf_with_internal_links.pdf"), workingFile));
+
+    Okular::Part editorPart(nullptr, {});
+    QVERIFY(openDocument(&editorPart, workingFile));
+    QString errorText;
+    QVERIFY2(editorPart.m_document->saveWithPdfPageInsertedAfter(workingFile, editedFile, 1, workingFile, 1, true, &errorText), qPrintable(errorText));
+
+    Okular::Part reopenedPart(nullptr, {});
+    QVERIFY(openDocument(&reopenedPart, editedFile));
+    QCOMPARE(reopenedPart.m_document->pages(), 4u);
+    reopenedPart.widget()->show();
+    if (qgetenv("KDECI_CANNOT_CREATE_WINDOWS") == "1") {
+        QSKIP("KDE CI can't create a window on this platform, skipping some GUI tests");
+    }
+    QVERIFY(QTest::qWaitForWindowExposed(reopenedPart.widget()));
+
+    reopenedPart.m_document->setViewportPage(0);
+    QTRY_VERIFY(reopenedPart.m_document->page(0)->hasPixmap(reopenedPart.m_pageView));
+    reopenedPart.m_document->requestTextPage(0);
+    QTRY_VERIFY(reopenedPart.m_document->page(0)->hasTextPage());
+
+    QPoint internalLinkPosition;
+    DocumentViewport internalLinkTarget;
+    QString internalLinkTitle;
+    const QString expectedLinkTitle = QStringLiteral("2.2 Example for list (enumerate)");
+    QVERIFY(findVisibleInternalGotoLink(reopenedPart.m_pageView, reopenedPart.m_document, 0, 3, expectedLinkTitle, &internalLinkPosition, &internalLinkTarget, &internalLinkTitle));
+    QCOMPARE(internalLinkTitle, expectedLinkTitle);
+    QCOMPARE(internalLinkTarget.pageNumber, 3);
+
+    reopenedPart.m_document->setViewportPage(1);
+    QTRY_VERIFY(reopenedPart.m_document->page(1)->hasPixmap(reopenedPart.m_pageView));
+    reopenedPart.m_document->requestTextPage(1);
+    QTRY_VERIFY(reopenedPart.m_document->page(1)->hasTextPage());
+
+    const DocumentViewport sourceDestination(reopenedPart.m_document->metaData(QStringLiteral("NamedViewport"), QStringLiteral("section.1")).toString());
+    const DocumentViewport cloneDestination(reopenedPart.m_document->metaData(QStringLiteral("NamedViewport"), QStringLiteral("section.1~2")).toString());
+    QVERIFY(sourceDestination.isValid());
+    QCOMPARE(sourceDestination.pageNumber, 0);
+    QVERIFY(cloneDestination.isValid());
+    QCOMPARE(cloneDestination.pageNumber, 1);
+    QVERIFY(hasInternalGotoLinkToPage(reopenedPart.m_document, 1, 1));
+    QVERIFY(hasInternalGotoLinkToPage(reopenedPart.m_document, 1, 2));
+    QVERIFY(hasInternalGotoLinkToPage(reopenedPart.m_document, 1, 3));
+
+    Okular::Part secondEditorPart(nullptr, {});
+    QVERIFY(openDocument(&secondEditorPart, editedFile));
+    QVERIFY2(secondEditorPart.m_document->saveWithPdfPageInsertedAfter(editedFile, editedAgainFile, 1, editedFile, 1, true, &errorText), qPrintable(errorText));
+
+    Okular::Part reopenedAgainPart(nullptr, {});
+    QVERIFY(openDocument(&reopenedAgainPart, editedAgainFile));
+    QCOMPARE(reopenedAgainPart.m_document->pages(), 5u);
+    reopenedAgainPart.widget()->show();
+    QVERIFY(QTest::qWaitForWindowExposed(reopenedAgainPart.widget()));
+    reopenedAgainPart.m_document->setViewportPage(1);
+    QTRY_VERIFY(reopenedAgainPart.m_document->page(1)->hasPixmap(reopenedAgainPart.m_pageView));
+    reopenedAgainPart.m_document->requestTextPage(1);
+    QTRY_VERIFY(reopenedAgainPart.m_document->page(1)->hasTextPage());
+    const DocumentViewport firstCloneDestination(reopenedAgainPart.m_document->metaData(QStringLiteral("NamedViewport"), QStringLiteral("section.1~2")).toString());
+    const DocumentViewport secondCloneDestination(reopenedAgainPart.m_document->metaData(QStringLiteral("NamedViewport"), QStringLiteral("section.1~3")).toString());
+    QVERIFY(firstCloneDestination.isValid());
+    QCOMPARE(firstCloneDestination.pageNumber, 2);
+    QVERIFY(secondCloneDestination.isValid());
+    QCOMPARE(secondCloneDestination.pageNumber, 1);
+    QVERIFY(hasInternalGotoLinkToPage(reopenedAgainPart.m_document, 1, 1));
+    QVERIFY(hasInternalGotoLinkToPage(reopenedAgainPart.m_document, 1, 3));
+    QVERIFY(hasInternalGotoLinkToPage(reopenedAgainPart.m_document, 1, 4));
+
+    Okular::Part asIsEditorPart(nullptr, {});
+    QVERIFY(openDocument(&asIsEditorPart, workingFile));
+    QVERIFY2(asIsEditorPart.m_document->saveWithPdfPageInsertedAfter(workingFile, asIsFile, 1, workingFile, 1, false, &errorText), qPrintable(errorText));
+
+    Okular::Part asIsPart(nullptr, {});
+    QVERIFY(openDocument(&asIsPart, asIsFile));
+    QCOMPARE(asIsPart.m_document->pages(), 4u);
+    asIsPart.widget()->show();
+    QVERIFY(QTest::qWaitForWindowExposed(asIsPart.widget()));
+    asIsPart.m_document->setViewportPage(1);
+    QTRY_VERIFY(asIsPart.m_document->page(1)->hasPixmap(asIsPart.m_pageView));
+    asIsPart.m_document->requestTextPage(1);
+    QTRY_VERIFY(asIsPart.m_document->page(1)->hasTextPage());
+    const DocumentViewport asIsSourceDestination(asIsPart.m_document->metaData(QStringLiteral("NamedViewport"), QStringLiteral("section.1")).toString());
+    const DocumentViewport asIsCloneDestination(asIsPart.m_document->metaData(QStringLiteral("NamedViewport"), QStringLiteral("section.1~2")).toString());
+    QVERIFY(asIsSourceDestination.isValid());
+    QCOMPARE(asIsSourceDestination.pageNumber, 0);
+    QVERIFY(!asIsCloneDestination.isValid());
+    QVERIFY(hasInternalGotoLinkToPage(asIsPart.m_document, 1, 0));
+    QVERIFY(hasInternalGotoLinkToPage(asIsPart.m_document, 1, 2));
+    QVERIFY(hasInternalGotoLinkToPage(asIsPart.m_document, 1, 3));
+}
+
+void PartTest::testInsertPdfPagePreservesInternalLinks()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString workingFile = tempDir.filePath(QStringLiteral("internal-links-source.pdf"));
+    const QString editedFile = tempDir.filePath(QStringLiteral("internal-links-page-inserted.pdf"));
+    QVERIFY(QFile::copy(QStringLiteral(KDESRCDIR "data/pdf_with_internal_links.pdf"), workingFile));
+
+    Okular::Part editorPart(nullptr, {});
+    QVERIFY(openDocument(&editorPart, workingFile));
+    QString errorText;
+    QVERIFY2(editorPart.m_document->saveWithPdfPageInsertedAfter(workingFile, editedFile, 1, QStringLiteral(KDESRCDIR "data/file1.pdf"), 1, false, &errorText), qPrintable(errorText));
+
+    Okular::Part reopenedPart(nullptr, {});
+    QVERIFY(openDocument(&reopenedPart, editedFile));
+    QCOMPARE(reopenedPart.m_document->pages(), 4u);
+    reopenedPart.widget()->show();
+    if (qgetenv("KDECI_CANNOT_CREATE_WINDOWS") == "1") {
+        QSKIP("KDE CI can't create a window on this platform, skipping some GUI tests");
+    }
+    QVERIFY(QTest::qWaitForWindowExposed(reopenedPart.widget()));
+
+    reopenedPart.m_document->setViewportPage(0);
+    QTRY_VERIFY(reopenedPart.m_document->page(0)->hasPixmap(reopenedPart.m_pageView));
+    reopenedPart.m_document->requestTextPage(0);
+    QTRY_VERIFY(reopenedPart.m_document->page(0)->hasTextPage());
+
+    QPoint internalLinkPosition;
+    DocumentViewport internalLinkTarget;
+    QString internalLinkTitle;
+    const QString expectedLinkTitle = QStringLiteral("2.2 Example for list (enumerate)");
+    QVERIFY(findVisibleInternalGotoLink(reopenedPart.m_pageView, reopenedPart.m_document, 0, 3, expectedLinkTitle, &internalLinkPosition, &internalLinkTarget, &internalLinkTitle));
+    QCOMPARE(internalLinkTitle, expectedLinkTitle);
+    QCOMPARE(internalLinkTarget.pageNumber, 3);
+
+    const QString mergeHostFile = tempDir.filePath(QStringLiteral("merge-host.pdf"));
+    const QString mergeFirstPageFile = tempDir.filePath(QStringLiteral("merge-first-page.pdf"));
+    const QString mergeLinkedPagesFile = tempDir.filePath(QStringLiteral("merge-linked-pages.pdf"));
+    QVERIFY(QFile::copy(QStringLiteral(KDESRCDIR "data/file1.pdf"), mergeHostFile));
+
+    Okular::Part firstMergePart(nullptr, {});
+    QVERIFY(openDocument(&firstMergePart, mergeHostFile));
+    QVERIFY2(firstMergePart.m_document->saveWithPdfPageInsertedAfter(mergeHostFile, mergeFirstPageFile, 1, workingFile, 1, false, &errorText), qPrintable(errorText));
+
+    Okular::Part secondMergePart(nullptr, {});
+    QVERIFY(openDocument(&secondMergePart, mergeFirstPageFile));
+    QVERIFY2(secondMergePart.m_document->saveWithPdfPageInsertedAfter(mergeFirstPageFile, mergeLinkedPagesFile, 2, workingFile, 3, false, &errorText), qPrintable(errorText));
+
+    Okular::Part mergedPart(nullptr, {});
+    QVERIFY(openDocument(&mergedPart, mergeLinkedPagesFile));
+    QCOMPARE(mergedPart.m_document->pages(), 3u);
+    mergedPart.widget()->show();
+    QVERIFY(QTest::qWaitForWindowExposed(mergedPart.widget()));
+    mergedPart.m_document->setViewportPage(1);
+    QTRY_VERIFY(mergedPart.m_document->page(1)->hasPixmap(mergedPart.m_pageView));
+    mergedPart.m_document->requestTextPage(1);
+    QTRY_VERIFY(mergedPart.m_document->page(1)->hasTextPage());
+    QVERIFY(hasInternalGotoLinkToPage(mergedPart.m_document, 1, 2));
+}
+
+void PartTest::testStandaloneCombineBackend()
+{
+    const QString sourceFile = qEnvironmentVariable("MENGSHEE_COMBINE_BACKEND_INPUT", QStringLiteral(KDESRCDIR "data/file1.pdf"));
+    const QFileInfo sourceInfo(sourceFile);
+    QVERIFY(sourceInfo.exists());
+
+    QMimeDatabase mimeDatabase;
+    const QMimeType mimeType = mimeDatabase.mimeTypeForFile(sourceInfo.absoluteFilePath(), QMimeDatabase::MatchContent);
+    Okular::Document backendDocument(nullptr);
+    QCOMPARE(backendDocument.openDocument(sourceInfo.absoluteFilePath(), QUrl::fromLocalFile(sourceInfo.absoluteFilePath()), mimeType), Okular::Document::OpenSuccess);
+    QVERIFY(backendDocument.canCombinePdfFiles());
+
+    QString errorText;
+    QCOMPARE(backendDocument.pdfPageCount(sourceInfo.absoluteFilePath(), &errorText), static_cast<int>(backendDocument.pages()));
+    QVERIFY2(errorText.isEmpty(), qPrintable(errorText));
+}
+
+void PartTest::testCombinePdfAvailableWithoutDocument()
+{
+    Okular::Part part(nullptr, {});
+    QAction *combineAction = part.actionCollection()->action(QStringLiteral("file_combine_pdfs"));
+    QVERIFY(combineAction);
+    QVERIFY(combineAction->isEnabled());
+    QVERIFY(!part.m_document->isOpened());
+
+    bool dialogOpened = false;
+    QTimer::singleShot(0, [&dialogOpened] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        if (dialog) {
+            dialogOpened = true;
+            dialog->reject();
+        }
+    });
+    combineAction->trigger();
+
+    QVERIFY(dialogOpened);
+    QVERIFY(!part.m_document->isOpened());
+}
+
+void PartTest::testCombinePdfFilesPreservesSourceLinkNamespaces()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString sourceFile = tempDir.filePath(QStringLiteral("internal-links-source.pdf"));
+    const QString namespacedFile = tempDir.filePath(QStringLiteral("combined-internal-links-namespaced.pdf"));
+    const QString asIsFile = tempDir.filePath(QStringLiteral("combined-internal-links-as-is.pdf"));
+    QVERIFY(QFile::copy(QStringLiteral(KDESRCDIR "data/pdf_with_internal_links.pdf"), sourceFile));
+
+    Okular::Part editorPart(nullptr, {});
+    QVERIFY(openDocument(&editorPart, sourceFile));
+    QVERIFY(editorPart.m_document->canCombinePdfFiles());
+    QString errorText;
+    QCOMPARE(editorPart.m_document->pdfPageCount(sourceFile, &errorText), 3);
+    QVERIFY2(errorText.isEmpty(), qPrintable(errorText));
+    QVERIFY2(editorPart.m_document->combinePdfFiles(QStringList { sourceFile, sourceFile }, namespacedFile, true, &errorText), qPrintable(errorText));
+    QVERIFY2(editorPart.m_document->combinePdfFiles(QStringList { sourceFile, sourceFile }, asIsFile, false, &errorText), qPrintable(errorText));
+
+    const QString debugOutput = QString::fromLocal8Bit(qgetenv("MENGSHEE_COMBINE_TEST_OUTPUT"));
+    if (!debugOutput.isEmpty()) {
+        QFile::remove(debugOutput);
+        QVERIFY(QFile::copy(namespacedFile, debugOutput));
+    }
+
+    Okular::Part combinedPart(nullptr, {});
+    QVERIFY(openDocument(&combinedPart, namespacedFile));
+    QCOMPARE(combinedPart.m_document->pages(), 6u);
+    combinedPart.widget()->show();
+    if (qgetenv("KDECI_CANNOT_CREATE_WINDOWS") == "1") {
+        QSKIP("KDE CI can't create a window on this platform, skipping some GUI tests");
+    }
+    QVERIFY(QTest::qWaitForWindowExposed(combinedPart.widget()));
+
+    const DocumentViewport unsuffixedDestination(combinedPart.m_document->metaData(QStringLiteral("NamedViewport"), QStringLiteral("section.1")).toString());
+    const DocumentViewport firstSourceDestination(combinedPart.m_document->metaData(QStringLiteral("NamedViewport"), QStringLiteral("section.1~1")).toString());
+    const DocumentViewport secondSourceDestination(combinedPart.m_document->metaData(QStringLiteral("NamedViewport"), QStringLiteral("section.1~2")).toString());
+    QVERIFY(!unsuffixedDestination.isValid());
+    QVERIFY(firstSourceDestination.isValid());
+    QCOMPARE(firstSourceDestination.pageNumber, 0);
+    QVERIFY(secondSourceDestination.isValid());
+    QCOMPARE(secondSourceDestination.pageNumber, 3);
+
+    combinedPart.m_document->setViewportPage(0);
+    QTRY_VERIFY(combinedPart.m_document->page(0)->hasPixmap(combinedPart.m_pageView));
+    combinedPart.m_document->requestTextPage(0);
+    QTRY_VERIFY(combinedPart.m_document->page(0)->hasTextPage());
+    QVERIFY(hasInternalGotoLinkToPage(combinedPart.m_document, 0, 2));
+    QVERIFY(!hasInternalGotoLinkToPage(combinedPart.m_document, 0, 5));
+
+    combinedPart.m_document->setViewportPage(3);
+    QTRY_VERIFY(combinedPart.m_document->page(3)->hasPixmap(combinedPart.m_pageView));
+    combinedPart.m_document->requestTextPage(3);
+    QTRY_VERIFY(combinedPart.m_document->page(3)->hasTextPage());
+    QVERIFY(hasInternalGotoLinkToPage(combinedPart.m_document, 3, 5));
+    QVERIFY(!hasInternalGotoLinkToPage(combinedPart.m_document, 3, 2));
+
+    Okular::Part asIsPart(nullptr, {});
+    QVERIFY(openDocument(&asIsPart, asIsFile));
+    QCOMPARE(asIsPart.m_document->pages(), 6u);
+    asIsPart.widget()->show();
+    QVERIFY(QTest::qWaitForWindowExposed(asIsPart.widget()));
+
+    const DocumentViewport asIsDestination(asIsPart.m_document->metaData(QStringLiteral("NamedViewport"), QStringLiteral("section.1")).toString());
+    const DocumentViewport unexpectedSuffix(asIsPart.m_document->metaData(QStringLiteral("NamedViewport"), QStringLiteral("section.1~2")).toString());
+    QVERIFY(asIsDestination.isValid());
+    QCOMPARE(asIsDestination.pageNumber, 0);
+    QVERIFY(!unexpectedSuffix.isValid());
+
+    asIsPart.m_document->setViewportPage(3);
+    QTRY_VERIFY(asIsPart.m_document->page(3)->hasPixmap(asIsPart.m_pageView));
+    asIsPart.m_document->requestTextPage(3);
+    QTRY_VERIFY(asIsPart.m_document->page(3)->hasTextPage());
+    QVERIFY(hasInternalGotoLinkToPage(asIsPart.m_document, 3, 2));
+    QVERIFY(!hasInternalGotoLinkToPage(asIsPart.m_document, 3, 5));
 }
 
 void PartTest::testOpenUrlArguments()

@@ -109,8 +109,24 @@ private Q_SLOTS:
     void testOpenInvalidFiles_data();
     void testOpenInvalidFiles();
     void testOpenTheSameFileSeveralTimes();
+    void testWindowsSecondWindowUsesDetachedProcess();
 
 private:
+};
+
+class RecordingDetachedShell final : public Shell
+{
+public:
+    using Shell::Shell;
+
+    QStringList launchedDocuments;
+
+protected:
+    bool launchDetachedDocument(const QString &path) override
+    {
+        launchedDocuments.append(path);
+        return true;
+    }
 };
 
 QList<Shell *> getShells()
@@ -695,6 +711,29 @@ void MainShellTest::testOpenTheSameFileSeveralTimes()
     QVERIFY(shell->m_tabs.size() == 4);
 
     Okular::Settings::self()->setSwitchToTabIfOpen(true);
+}
+
+void MainShellTest::testWindowsSecondWindowUsesDetachedProcess()
+{
+#ifndef Q_OS_WIN
+    QSKIP("Mengshee uses process-per-window document opening only on Windows.");
+#else
+    Okular::Settings::self()->setShellOpenFileInTabs(false);
+    auto *shell = new RecordingDetachedShell;
+    QVERIFY(shell->isValid());
+
+    const QUrl firstFile = QUrl::fromLocalFile(QStringLiteral(KDESRCDIR "data/file1.pdf"));
+    const QUrl secondFile = QUrl::fromLocalFile(QStringLiteral(KDESRCDIR "data/file2.pdf"));
+    shell->openUrl(firstFile);
+    QCOMPARE(shell->launchedDocuments, QStringList());
+    QCOMPARE(shell->m_tabs.size(), 1);
+    QCOMPARE(shell->m_tabs.constFirst().part->url(), firstFile);
+
+    shell->openUrl(secondFile);
+    QCOMPARE(shell->launchedDocuments, QStringList { secondFile.toLocalFile() });
+    QCOMPARE(shell->m_tabs.size(), 1);
+    QCOMPARE(shell->m_tabs.constFirst().part->url(), firstFile);
+#endif
 }
 
 void MainShellTest::testMiddleButtonCloseUndo()

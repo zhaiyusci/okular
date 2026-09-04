@@ -107,7 +107,19 @@ public:
     bool saveWithBlankPageInsertedAfter(const QString &sourceFileName, const QString &outputFileName, int pageNumber, QString *errorText) override;
     bool saveWithBlankPageInsertedAfter(const QString &sourceFileName, const QString &outputFileName, int pageNumber, double width, double height, QString *errorText) override;
     bool canInsertPageFromPdf() const override;
-    bool saveWithPdfPageInsertedAfter(const QString &sourceFileName, const QString &outputFileName, int pageNumber, const QString &insertedFileName, int pageToInsert, QString *errorText) override;
+    bool saveWithPdfPageInsertedAfter(const QString &sourceFileName,
+                                      const QString &outputFileName,
+                                      int pageNumber,
+                                      const QString &insertedFileName,
+                                      int pageToInsert,
+                                      bool resolveDestinationConflicts,
+                                      QString *errorText) override;
+    bool canCombinePdfFiles() const override;
+    int pdfPageCount(const QString &inputFileName, QString *errorText) override;
+    bool combinePdfFiles(const QStringList &inputFileNames,
+                         const QString &outputFileName,
+                         bool resolveDestinationConflicts,
+                         QString *errorText) override;
     bool canDeletePage() const override;
     bool saveWithPageDeleted(const QString &sourceFileName, const QString &outputFileName, int pageNumber, QString *errorText) override;
     bool canMovePage() const override;

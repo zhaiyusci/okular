@@ -3818,9 +3818,27 @@ bool PageView::viewportEvent(QEvent *e)
                 r.translate(-contentAreaPosition());
                 QString tip = link->actionTip();
                 Okular::DocumentViewport target;
-                if (viewportForInternalGotoLink(d->document, rect, &target)) {
-                    const QString modifiedClickTip = i18nc("@info:tooltip Shown when hovering an internal PDF link; describes mouse shortcuts.", "Middle-click or Ctrl+left-click to open in an auxiliary frame.");
-                    tip = tip.isEmpty() ? modifiedClickTip : tip + QLatin1Char('\n') + modifiedClickTip;
+                if (link->actionType() == Okular::Action::Goto) {
+                    const auto *gotoAction = static_cast<const Okular::GotoAction *>(link);
+                    if (!gotoAction->isExternal()) {
+                        const QString destinationName = gotoAction->destinationName();
+                        const bool resolved = viewportForInternalGotoLink(d->document, rect, &target);
+                        QString destinationTip;
+                        if (resolved && destinationName.isEmpty()) {
+                            destinationTip = i18nc("@info:tooltip Internal PDF link destination", "Destination: page %1", target.pageNumber + 1);
+                        } else if (resolved) {
+                            destinationTip = i18nc("@info:tooltip Internal PDF named link destination and resolved page", "Named destination: %1\nResolved page: %2", destinationName, target.pageNumber + 1);
+                        } else if (!destinationName.isEmpty()) {
+                            destinationTip = i18nc("@info:tooltip Internal PDF named link that cannot be resolved", "Named destination: %1\nStatus: unresolved", destinationName);
+                        } else {
+                            destinationTip = i18nc("@info:tooltip Internal PDF link that cannot be resolved", "Destination: unresolved");
+                        }
+                        tip = destinationTip;
+                        if (resolved) {
+                            const QString modifiedClickTip = i18nc("@info:tooltip Shown when hovering an internal PDF link; describes mouse shortcuts.", "Middle-click or Ctrl+left-click to open in an auxiliary frame.");
+                            tip += QLatin1Char('\n') + modifiedClickTip;
+                        }
+                    }
                 }
                 if (!tip.isEmpty()) {
                     QToolTip::showText(he->globalPos(), tip, viewport(), r);
