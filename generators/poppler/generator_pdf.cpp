@@ -2238,6 +2238,33 @@ QVariant PDFGenerator::metaData(const QString &key, const QVariant &option) cons
         if (pdfdoc && pdfdoc->pageMode() == Poppler::Document::FullScreen) {
             return true;
         }
+    } else if (key == QLatin1String("NamedViewports")) {
+        QVariantList destinations;
+        QMutexLocker locker(userMutex());
+        if (!pdfdoc) {
+            return destinations;
+        }
+
+        const QStringList names = pdfdoc->namedDestinationNames();
+        destinations.reserve(names.size());
+        for (const QString &name : names) {
+            const std::unique_ptr<Poppler::LinkDestination> destination = pdfdoc->linkDestination(name);
+            if (!destination) {
+                continue;
+            }
+
+            Okular::DocumentViewport viewport;
+            fillViewportFromLinkDestination(viewport, *destination);
+            if (!viewport.isValid()) {
+                continue;
+            }
+
+            QVariantMap entry;
+            entry.insert(QStringLiteral("name"), name);
+            entry.insert(QStringLiteral("viewport"), viewport.toString());
+            destinations.append(entry);
+        }
+        return destinations;
     } else if (key == QLatin1String("NamedViewport") && !option.toString().isEmpty()) {
         Okular::DocumentViewport viewport;
         QString optionString = option.toString();

@@ -245,6 +245,8 @@ private:
     void notifyAnnotationWindowsAboutViewportBoundsChange();
     // draw background and items on the opened qpainter
     void drawDocumentOnPainter(const QRect contentsRect, QPainter *p);
+    void drawNamedDestinations(const QRect &contentsRect, QPainter *p);
+    void loadNamedDestinations();
     // update item width and height using current zoom parameters
     void updateItemSize(PageViewItem *item, int colWidth, int rowHeight);
     // return the widget placed on a certain point or 0 if clicking on empty space

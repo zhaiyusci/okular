@@ -87,6 +87,7 @@ private Q_SLOTS:
     void testRemoveLineBreaks_data();
     void testRemoveLineBreaks();
     void testClickInternalLink();
+    void testNamedDestinationOverlay();
     void testOpenAuxiliaryViewWithoutLink();
     void testAuxiliaryDocumentWorkspace();
     void testFindBarDoesNotConsumeWorkspaceHeight();
@@ -737,6 +738,36 @@ void PartTest::testClickInternalLink()
 
     // make sure cursor goes back to being an open hand again.  Bug 421437
     QTRY_COMPARE_WITH_TIMEOUT(part.m_pageView->cursor().shape(), Qt::OpenHandCursor, 1000);
+}
+
+void PartTest::testNamedDestinationOverlay()
+{
+    Okular::Part part(nullptr, {});
+    QVERIFY(openDocument(&part, QStringLiteral(KDESRCDIR "data/pdf_with_internal_links.pdf")));
+
+    const QVariantList destinations = part.m_document->metaData(QStringLiteral("NamedViewports")).toList();
+    QVERIFY(!destinations.isEmpty());
+
+    bool foundSection = false;
+    bool foundSubsection = false;
+    for (const QVariant &destinationValue : destinations) {
+        const QVariantMap destination = destinationValue.toMap();
+        const QString name = destination.value(QStringLiteral("name")).toString();
+        const DocumentViewport viewport(destination.value(QStringLiteral("viewport")).toString());
+        QVERIFY(viewport.isValid());
+        foundSection |= name == QLatin1String("section.1");
+        foundSubsection |= name == QLatin1String("subsection.2.1");
+    }
+    QVERIFY(foundSection);
+    QVERIFY(foundSubsection);
+
+    QAction *toggle = part.actionCollection()->action(QStringLiteral("view_toggle_named_destinations"));
+    QVERIFY(toggle);
+    QVERIFY(toggle->isCheckable());
+    QVERIFY(toggle->isEnabled());
+    toggle->setChecked(true);
+    QVERIFY(toggle->isChecked());
+    QApplication::processEvents();
 }
 
 void PartTest::testOpenAuxiliaryViewWithoutLink()

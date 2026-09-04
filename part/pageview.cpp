@@ -29,7 +29,9 @@
 #include <QElapsedTimer>
 #include <QEvent>
 #include <QFrame>
+#include <QFontMetricsF>
 #include <QGestureEvent>
+#include <QHash>
 #include <QImage>
 #include <QInputDialog>
 #include <QLoggingCategory>
@@ -168,6 +170,12 @@ struct TableSelectionPart {
     TableSelectionPart(PageViewItem *item_p, const Okular::NormalizedRect &rectInItem_p, const Okular::NormalizedRect &rectInSelection_p);
 };
 
+struct NamedDestinationMarker {
+    QString name;
+    double normalizedX = 0.0;
+    double normalizedY = 0.0;
+};
+
 TableSelectionPart::TableSelectionPart(PageViewItem *item_p, const Okular::NormalizedRect &rectInItem_p, const Okular::NormalizedRect &rectInSelection_p)
     : item(item_p)
     , rectInItem(rectInItem_p)
@@ -196,6 +204,9 @@ public:
     QList<PageViewItem *> items;
     QList<PageViewItem *> visibleItems;
     MagnifierView *magnifierView = nullptr;
+    QHash<int, QList<NamedDestinationMarker>> namedDestinationsByPage;
+    bool namedDestinationsLoaded = false;
+    bool showNamedDestinations = false;
 
     // view layout (columns in Settings), zoom and mouse
     PageView::ZoomMode zoomMode = PageView::ZoomFitWidth;
@@ -300,6 +311,7 @@ public:
     KToggleAction *aViewContinuous = nullptr;
     QAction *aPrevAction = nullptr;
     KToggleAction *aToggleForms = nullptr;
+    KToggleAction *aToggleNamedDestinations = nullptr;
     QAction *aSpeakDoc = nullptr;
     QAction *aSpeakDocFromPage = nullptr;
     QAction *aSpeakPage = nullptr;
@@ -699,6 +711,17 @@ void PageView::setupViewerActions(KActionCollection *ac)
     ac->addAction(QStringLiteral("rtl_page_layout"), d->aReadingDirection);
     connect(d->aReadingDirection, &QAction::toggled, this, &PageView::slotReadingDirectionToggled);
     connect(Okular::SettingsCore::self(), &Okular::SettingsCore::configChanged, this, &PageView::slotUpdateReadingDirectionAction);
+
+    d->aToggleNamedDestinations = new KToggleAction(QIcon::fromTheme(QStringLiteral("insert-link")), i18n("Show Named Destinations"), this);
+    ac->addAction(QStringLiteral("view_toggle_named_destinations"), d->aToggleNamedDestinations);
+    d->aToggleNamedDestinations->setEnabled(false);
+    connect(d->aToggleNamedDestinations, &QAction::toggled, this, [this](bool checked) {
+        d->showNamedDestinations = checked;
+        if (checked && !d->namedDestinationsLoaded) {
+            loadNamedDestinations();
+        }
+        viewport()->update();
+    });
 
     // Mouse mode actions for viewer mode
     d->mouseModeActionGroup = new QActionGroup(this);
@@ -1388,6 +1411,11 @@ void PageView::notifySetup(const QList<Okular::Page *> &pageSet, int setupFlags)
     d->auxiliaryLinkControlClickPending = false;
     d->auxiliaryLinkMiddleClickPending = false;
 
+    if (setupFlags & (Okular::DocumentObserver::DocumentChanged | Okular::DocumentObserver::UrlChanged)) {
+        d->namedDestinationsByPage.clear();
+        d->namedDestinationsLoaded = false;
+    }
+
     bool documentChanged = setupFlags & Okular::DocumentObserver::DocumentChanged;
     const bool allowfillforms = d->document->isAllowed(Okular::AllowFillForms);
 
@@ -1451,6 +1479,11 @@ void PageView::notifySetup(const QList<Okular::Page *> &pageSet, int setupFlags)
                         vw->show();
                         vw->hide();
                     }
+                }
+
+                if (d->showNamedDestinations) {
+                    loadNamedDestinations();
+                    viewport()->update();
                 }
             }
 
@@ -1521,6 +1554,10 @@ void PageView::notifySetup(const QList<Okular::Page *> &pageSet, int setupFlags)
 
     updateActionState(haspages, hasformwidgets);
 
+    if (haspages && d->showNamedDestinations) {
+        loadNamedDestinations();
+    }
+
     // We need to assign it to a different list otherwise slotAnnotationWindowDestroyed
     // will bite us and clear d->m_annowindows
     QSet<AnnotWindow *> annowindows = d->m_annowindows;
@@ -1576,6 +1613,9 @@ void PageView::updateActionState(bool haspages, bool hasformwidgets)
     }
     if (d->aToggleForms) { // may be null if dummy mode is on
         d->aToggleForms->setEnabled(haspages && hasformwidgets);
+    }
+    if (d->aToggleNamedDestinations) {
+        d->aToggleNamedDestinations->setEnabled(haspages);
     }
     bool allowAnnotations = d->document->isAllowed(Okular::AllowNotes);
     if (d->annotator) {
@@ -2216,6 +2256,7 @@ void PageView::paintEvent(QPaintEvent *pe)
             d->mouseAnnotation->routePaint(&pixmapPainter, contentsRect);
 
             // 4) Layer 2: overlays
+            drawNamedDestinations(contentsRect, &pixmapPainter);
             if (Okular::Settings::debugDrawBoundaries()) {
                 pixmapPainter.setPen(Qt::blue);
                 pixmapPainter.drawRect(contentsRect);
@@ -2252,6 +2293,7 @@ void PageView::paintEvent(QPaintEvent *pe)
             d->mouseAnnotation->routePaint(&screenPainter, contentsRect);
 
             // 4) Layer 2: overlays
+            drawNamedDestinations(contentsRect, &screenPainter);
             if (Okular::Settings::debugDrawBoundaries()) {
                 screenPainter.setPen(Qt::red);
                 screenPainter.drawRect(contentsRect);
@@ -2290,6 +2332,176 @@ void PageView::drawTableDividers(QPainter *screenPainter)
             }
         }
     }
+}
+
+void PageView::loadNamedDestinations()
+{
+    d->namedDestinationsByPage.clear();
+    d->namedDestinationsLoaded = true;
+
+    const QVariantList destinations = d->document->metaData(QStringLiteral("NamedViewports")).toList();
+    for (const QVariant &destinationValue : destinations) {
+        const QVariantMap destination = destinationValue.toMap();
+        const QString name = destination.value(QStringLiteral("name")).toString();
+        const Okular::DocumentViewport viewport(destination.value(QStringLiteral("viewport")).toString());
+        if (name.isEmpty() || !viewport.isValid()) {
+            continue;
+        }
+
+        NamedDestinationMarker marker;
+        marker.name = name;
+        if (viewport.rePos.enabled) {
+            marker.normalizedX = normClamp(viewport.rePos.normalizedX, 0.0);
+            marker.normalizedY = normClamp(viewport.rePos.normalizedY, 0.0);
+        }
+        d->namedDestinationsByPage[viewport.pageNumber].append(marker);
+    }
+}
+
+void PageView::drawNamedDestinations(const QRect &contentsRect, QPainter *p)
+{
+    if (!d->showNamedDestinations || !d->namedDestinationsLoaded || d->namedDestinationsByPage.isEmpty()) {
+        return;
+    }
+
+    struct DestinationGroup {
+        QPointF anchor;
+        QStringList names;
+    };
+
+    p->save();
+    p->setClipRect(contentsRect, Qt::IntersectClip);
+    p->setRenderHint(QPainter::Antialiasing, true);
+    p->setRenderHint(QPainter::TextAntialiasing, true);
+
+    QFont labelFont = p->font();
+    if (labelFont.pointSizeF() > 0.0) {
+        labelFont.setPointSizeF(qMax(8.0, labelFont.pointSizeF() - 1.0));
+    } else if (labelFont.pixelSize() > 0) {
+        labelFont.setPixelSize(qMax(11, labelFont.pixelSize() - 1));
+    }
+    p->setFont(labelFont);
+    const QFontMetricsF metrics(labelFont);
+
+    const QColor markerColor(QStringLiteral("#0078d4"));
+    const QColor labelBackground(232, 246, 255, 238);
+    const QColor labelText(15, 32, 45);
+
+    for (const PageViewItem *item : std::as_const(d->items)) {
+        const auto destinationIt = d->namedDestinationsByPage.constFind(item->pageNumber());
+        if (destinationIt == d->namedDestinationsByPage.cend() || !item->isVisible() || !item->croppedGeometry().intersects(contentsRect)) {
+            continue;
+        }
+
+        const QRectF pageRect(item->croppedGeometry());
+        QList<DestinationGroup> groups;
+        for (const NamedDestinationMarker &marker : destinationIt.value()) {
+            Okular::NormalizedPoint normalized(marker.normalizedX, marker.normalizedY);
+            switch (item->page()->rotation()) {
+            case Okular::Rotation90:
+                normalized = Okular::NormalizedPoint(1.0 - marker.normalizedY, marker.normalizedX);
+                break;
+            case Okular::Rotation180:
+                normalized = Okular::NormalizedPoint(1.0 - marker.normalizedX, 1.0 - marker.normalizedY);
+                break;
+            case Okular::Rotation270:
+                normalized = Okular::NormalizedPoint(marker.normalizedY, 1.0 - marker.normalizedX);
+                break;
+            case Okular::Rotation0:
+                break;
+            }
+
+            QPointF anchor(item->uncroppedGeometry().left() + normalized.x * item->uncroppedWidth(), item->uncroppedGeometry().top() + normalized.y * item->uncroppedHeight());
+            anchor.setX(qBound(pageRect.left() + 3.0, anchor.x(), pageRect.right() - 3.0));
+            anchor.setY(qBound(pageRect.top() + 3.0, anchor.y(), pageRect.bottom() - 3.0));
+
+            auto groupIt = std::find_if(groups.begin(), groups.end(), [&anchor](const DestinationGroup &group) {
+                return qAbs(group.anchor.x() - anchor.x()) <= 2.0 && qAbs(group.anchor.y() - anchor.y()) <= 2.0;
+            });
+            if (groupIt == groups.end()) {
+                groups.append(DestinationGroup { anchor, { marker.name } });
+            } else {
+                groupIt->names.append(marker.name);
+            }
+        }
+
+        std::sort(groups.begin(), groups.end(), [](const DestinationGroup &left, const DestinationGroup &right) {
+            return left.anchor.y() == right.anchor.y() ? left.anchor.x() < right.anchor.x() : left.anchor.y() < right.anchor.y();
+        });
+
+        p->save();
+        p->setClipRect(pageRect, Qt::IntersectClip);
+        QList<QRectF> occupiedLabels;
+        const QRectF labelBounds = pageRect.adjusted(4.0, 4.0, -4.0, -4.0);
+
+        for (DestinationGroup &group : groups) {
+            group.names.removeDuplicates();
+            group.names.sort(Qt::CaseSensitive);
+
+            qreal textWidth = 0.0;
+            for (const QString &name : std::as_const(group.names)) {
+                textWidth = qMax(textWidth, metrics.horizontalAdvance(name));
+            }
+            const qreal labelWidth = qMin(textWidth + 12.0, labelBounds.width());
+            const qreal labelHeight = qMin(metrics.height() * group.names.size() + 8.0, labelBounds.height());
+
+            const QList<QPointF> candidatePositions = {
+                QPointF(group.anchor.x() + 9.0, group.anchor.y() + 9.0),
+                QPointF(group.anchor.x() + 9.0, group.anchor.y() - labelHeight - 9.0),
+                QPointF(group.anchor.x() - labelWidth - 9.0, group.anchor.y() + 9.0),
+                QPointF(group.anchor.x() - labelWidth - 9.0, group.anchor.y() - labelHeight - 9.0),
+            };
+
+            QRectF labelRect;
+            for (const QPointF &position : candidatePositions) {
+                QRectF candidate(position, QSizeF(labelWidth, labelHeight));
+                if (candidate.right() > labelBounds.right()) {
+                    candidate.moveRight(labelBounds.right());
+                }
+                if (candidate.bottom() > labelBounds.bottom()) {
+                    candidate.moveBottom(labelBounds.bottom());
+                }
+                if (candidate.left() < labelBounds.left()) {
+                    candidate.moveLeft(labelBounds.left());
+                }
+                if (candidate.top() < labelBounds.top()) {
+                    candidate.moveTop(labelBounds.top());
+                }
+
+                const bool overlaps = std::any_of(occupiedLabels.cbegin(), occupiedLabels.cend(), [&candidate](const QRectF &occupied) { return occupied.intersects(candidate); });
+                if (!overlaps) {
+                    labelRect = candidate;
+                    break;
+                }
+                if (labelRect.isNull()) {
+                    labelRect = candidate;
+                }
+            }
+            occupiedLabels.append(labelRect);
+
+            QPen leaderPen(markerColor);
+            leaderPen.setWidthF(1.25);
+            p->setPen(leaderPen);
+            p->drawLine(group.anchor, labelRect.center());
+
+            p->setPen(QPen(markerColor, 1.25));
+            p->setBrush(labelBackground);
+            p->drawRoundedRect(labelRect, 4.0, 4.0);
+
+            p->setPen(labelText);
+            p->setBrush(Qt::NoBrush);
+            p->drawText(labelRect.adjusted(6.0, 4.0, -6.0, -4.0), Qt::AlignLeft | Qt::AlignTop | Qt::TextDontClip, group.names.join(QLatin1Char('\n')));
+
+            p->setPen(QPen(Qt::white, 4.0));
+            p->drawEllipse(group.anchor, 5.0, 5.0);
+            p->setPen(QPen(markerColor, 2.0));
+            p->drawEllipse(group.anchor, 5.0, 5.0);
+            p->drawLine(group.anchor + QPointF(-8.0, 0.0), group.anchor + QPointF(8.0, 0.0));
+            p->drawLine(group.anchor + QPointF(0.0, -8.0), group.anchor + QPointF(0.0, 8.0));
+        }
+        p->restore();
+    }
+    p->restore();
 }
 
 void PageView::resizeEvent(QResizeEvent *e)

@@ -5393,6 +5393,7 @@ void Part::slotUpdateHamburgerMenu()
     curatedViewMenu->addAction(findActionInKPartHierarchy(QStringLiteral("view_trim_mode")));
     curatedViewMenu->addSeparator();
     curatedViewMenu->addAction(ac->action(QStringLiteral("view_toggle_forms")));
+    curatedViewMenu->addAction(ac->action(QStringLiteral("view_toggle_named_destinations")));
     m_hamburgerMenuAction->hideActionsOf(curatedViewMenu);
 
 #if HAVE_SPEECH
